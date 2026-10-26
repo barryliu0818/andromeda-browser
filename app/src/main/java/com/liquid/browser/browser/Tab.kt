@@ -1,0 +1,847 @@
+package com.liquid.browser.browser
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.net.Uri
+import android.os.Handler
+import android.os.Looper
+import android.view.View
+import android.view.ViewGroup
+import androidx.core.graphics.Insets
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceError
+import android.view.HapticFeedbackConstants
+import org.json.JSONObject
+import com.liquid.browser.player.isMediaUrl
+import android.webkit.WebSettings
+import android.webkit.WebChromeClient
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.webkit.ProfileStore
+import androidx.webkit.ScriptHandler
+import androidx.webkit.UserAgentMetadata
+import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
+
+const val INCOGNITO_PROFILE = "incognito"
+
+/** 長按網頁元素的結果：連結、圖片或圖片連結；x/y 為 WebView 內的觸控位置。 */
+@Immutable
+data class HitResult(val link: String?, val image: String?, val x: Float, val y: Float)
+
+/** 單一分頁：擁有自己的 WebView 與可觀察的頁面狀態。 */
+@Stable
+@SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
+class Tab(
+    val id: Long,
+    val incognito: Boolean,
+    context: Context,
+    private val listener: Listener,
+    desktopByDefault: Boolean = false,
+    identifyAsIPhone: Boolean = true,
+) {
+    interface Listener {
+        fun onScroll(tab: Tab, dy: Int, atBottom: Boolean)
+        fun onVisited(tab: Tab, url: String, title: String)
+        fun onIcon(host: String, iconUrl: String)
+        fun onDownload(tab: Tab, url: String, userAgent: String, contentDisposition: String?, mime: String?)
+        fun onLongPress(tab: Tab, hit: HitResult)
+        /** 網頁影片全螢幕：view 為 null 表示離開全螢幕 */
+        fun onCustomView(view: View?, callback: WebChromeClient.CustomViewCallback?)
+        fun searchPrefix(): String
+        /** 影片直連網址（mp4／m3u8／mpd）：回傳 true 表示已交給原生播放器，不在網頁中開啟 */
+        fun onMediaUrl(tab: Tab, url: String, typed: Boolean = false): Boolean
+        /** 網頁中 <video> 的「用原生播放器播放」按鈕；from 為影片在視窗中的位置（px） */
+        fun onNativeVideo(tab: Tab, src: String, title: String, from: androidx.compose.ui.geometry.Rect?, startMs: Long)
+        /** 網頁渲染程序被系統結束（記憶體不足）或崩潰：由 ViewModel 重建分頁，App 不跟著閃退 */
+        fun onRendererGone(tab: Tab)
+
+        /** 這個網站是否要阻擋廣告（總開關開著且不在例外清單） */
+        fun adBlockFor(pageHost: String): Boolean
+
+        /** 是否阻止未經點擊的跨站跳轉 */
+        fun blockRedirects(): Boolean
+
+        fun onRedirectBlocked(tab: Tab, url: String)
+
+        /** 點擊後被擋下的廣告跳轉（目標在廣告清單裡） */
+        fun onAdClickBlocked(tab: Tab, url: String)
+
+        /** 全螢幕控制列按下載（串流影片，網頁拿不到網址）：下載偵測到的最高畫質 */
+        fun onDownloadBest(tab: Tab)
+
+        /** 點擊時趁機開的彈出視窗被擋下 */
+        fun onPopupBlocked(tab: Tab)
+
+        /** 網頁點擊開的新視窗（window.open／target=_blank）：開成新分頁並記住來源頁，回傳新分頁 */
+        fun onPopup(opener: Tab): Tab
+
+        /** 原地翻譯：一批文字要翻譯 */
+        fun onTranslateBatch(tab: Tab, id: Int, texts: List<String>)
+
+        /** 網頁影片旁的「下載」鈕 */
+        fun onVideoDownload(tab: Tab, src: String, title: String)
+        /** 注入每個頁面的 JS（assets/gesture_layer.js＋video_detect.js） */
+        fun injectedScript(): String
+        /** Android 17 區域網路權限不足而無法載入（ERR_LOCAL_NETWORK_PERMISSION_MISSING） */
+        fun onLocalNetworkNeeded(tab: Tab)
+    }
+
+    val webView = WebView(context)
+    var url by mutableStateOf("")
+    var title by mutableStateOf("")
+    var progress by mutableIntStateOf(100)
+    var canGoBack by mutableStateOf(false)
+    var canGoForward by mutableStateOf(false)
+    var favicon by mutableStateOf<ImageBitmap?>(null)
+    var thumbnail by mutableStateOf<ImageBitmap?>(null)
+
+    /** 狀態列顏色：網頁 theme-color，沒有則為頁面背景色；載入完成前為 null */
+    var themeColor by mutableStateOf<Color?>(null)
+
+    /** 要求桌面版網站 */
+    var desktop by mutableStateOf(desktopByDefault)
+        private set
+
+    /** 讓網站識別為 iPhone（行動版）／Mac（桌面版）Safari */
+    var asIPhone = identifyAsIPhone
+        private set
+    private var iosShim: ScriptHandler? = null
+
+    /** 文字大小百分比（WebSettings.textZoom） */
+    var textZoom by mutableIntStateOf(100)
+        private set
+    var javaScript by mutableStateOf(true)
+        private set
+    var readerOn by mutableStateOf(false)
+        private set
+
+    // 在頁面上尋找
+    var findMatches by mutableIntStateOf(0)
+        private set
+    var findIndex by mutableIntStateOf(0)
+        private set
+
+    /** 離開頁面前的畫面（網址 → 縮圖），給邊緣滑動返回時顯示前一頁；最多保留 6 張 */
+    private val pageShots = object : LinkedHashMap<String, ImageBitmap>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ImageBitmap>?) = size > 6
+    }
+
+    private var lastRecorded: String? = null
+
+    /** 主頁面載入失敗（錯誤頁）：不記入歷史紀錄 */
+    private var loadFailed = false
+
+    /** 目前畫面上實際顯示的頁面網址（load() 會先改 url，所以另外記錄） */
+    private var shownUrl: String? = null
+    private var touchX = 0f
+    private var touchY = 0f
+
+    val isBlank get() = url.isEmpty()
+
+    /** 原地翻譯：是否顯示譯文、已送出／已完成的段數（顯示進度用） */
+    var translated by androidx.compose.runtime.mutableStateOf(false)
+    /** 這個頁面上次翻成的語言（換語言時要先丟掉舊譯文） */
+    var trTarget: String? = null
+    var trSent by androidx.compose.runtime.mutableIntStateOf(0)
+    var trDone by androidx.compose.runtime.mutableIntStateOf(0)
+
+    /** 開始原地翻譯（腳本只注入一次；切回原文後再翻會直接套用已有譯文） */
+    fun startTranslate(script: String) {
+        translated = true
+        webView.evaluateJavascript("$script\n;window.__lqTr.start();", null)
+    }
+
+    /** 換語言前：還原原文並丟掉舊譯文 */
+    fun resetTranslate() {
+        translated = false
+        webView.evaluateJavascript("window.__lqTr&&window.__lqTr.reset();", null)
+    }
+
+    fun showOriginal() {
+        translated = false
+        webView.evaluateJavascript("window.__lqTr&&window.__lqTr.restore();", null)
+    }
+
+    /** 這個頁面已阻擋的廣告／追蹤請求數 */
+    var blockedCount by androidx.compose.runtime.mutableIntStateOf(0)
+
+    /** 目前頁面的網域（網路執行緒也會讀，所以用 volatile 欄位而非 Compose 狀態） */
+    @Volatile var pageHost: String = ""
+        private set
+
+    /** 這個頁面嗅探到的影片網址（IDM 式「下載此影片」用）；換頁時清空 */
+    val media = androidx.compose.runtime.mutableStateListOf<String>()
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    // about:blank（彈出視窗新分頁還在等第一個網址）不顯示
+    val domain get() = if (url == "about:blank") "" else Uri.parse(url).host?.removePrefix("www.") ?: url
+    val insecure get() = url.startsWith("http://")
+
+    init {
+        // Compose AndroidView 預設給 WRAP_CONTENT：WebView 會把版面高度當成 0（高度隨內容延展），
+        // 導致網頁的 100vh／dvh 變成 0（例如 Google 首頁整個擠在上方）。明確指定 MATCH_PARENT。
+        webView.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        // 無痕分頁使用獨立的 WebView Profile：Cookie、快取、儲存空間與一般分頁隔離
+        if (incognito && WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
+            ProfileStore.getInstance().getOrCreateProfile(INCOGNITO_PROFILE)
+            WebViewCompat.setProfile(webView, INCOGNITO_PROFILE)
+        }
+        webView.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            loadWithOverviewMode = true
+            useWideViewPort = true
+            builtInZoomControls = true
+            displayZoomControls = false
+            mediaPlaybackRequiresUserGesture = true
+            // 網頁開新視窗時交給 onCreateWindow 開成新分頁（原頁面不會被換掉，回來不必重新載入）
+            setSupportMultipleWindows(true)
+        }
+        // 不送 X-Requested-With（WebView 預設會附上 App 套件名稱）
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.REQUESTED_WITH_HEADER_ALLOW_LIST)) {
+            WebSettingsCompat.setRequestedWithHeaderOriginAllowList(webView.settings, emptySet())
+        }
+        applyIdentity(reload = false)
+        // 往返快取：返回上一頁時從記憶體直接還原（不重新載入，被廣告帶走再回來時廣告也不會重新出現）
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.BACK_FORWARD_CACHE)) {
+            runCatching { WebSettingsCompat.setBackForwardCacheEnabled(webView.settings, true) }
+        }
+        // Google 安全瀏覽：詐騙、惡意軟體網站會先顯示警告頁
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.SAFE_BROWSING_ENABLE)) WebSettingsCompat.setSafeBrowsingEnabled(webView.settings, true)
+        // 頁尾留白：在每個頁面內容最後加一段與浮動控制列等高的空白，頁尾才能捲到網址列上方
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            WebViewCompat.addDocumentStartJavaScript(webView, END_SPACER_JS, setOf("*"))
+            WebViewCompat.addDocumentStartJavaScript(webView, LIFT_FIXED_JS, setOf("*"))
+        }
+        webView.webViewClient = object : WebViewClient() {
+            // 點連結離開頁面前先留下舊頁面的畫面（onPageStarted 時新頁面已提交、舊畫面已不在），邊緣滑動返回時使用
+            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                if (!request.isForMainFrame) return false
+                // 跳轉阻擋：頁面沒被點擊就自己跳到別的網站（伺服器轉址除外）
+                val target = request.url.host.orEmpty()
+                if (listener.blockRedirects() && !request.hasGesture() && !request.isRedirect && !isBlank && progress >= 100 && pageHost.isNotEmpty() &&
+                    target.isNotEmpty() && baseDomain(target) != baseDomain(pageHost)
+                ) {
+                    listener.onRedirectBlocked(this@Tab, request.url.toString())
+                    return true
+                }
+                // 點擊廣告跳轉：點的不是連結（影片、播放鍵、空白處），網頁卻趁這次點擊把整頁換到別的網站 → 擋下
+                // 只套用在已經載入過、使用者真的在上面點擊的頁面：彈出視窗剛開的新分頁（about:blank、還沒有網域）不算
+                if (listener.blockRedirects() && request.hasGesture() && !request.isRedirect && !isBlank && pageHost.isNotEmpty() &&
+                    target.isNotEmpty() && baseDomain(target) != baseDomain(pageHost)
+                ) {
+                    val hit = view.hitTestResult.type
+                    if (hit != WebView.HitTestResult.SRC_ANCHOR_TYPE && hit != WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE) {
+                        listener.onAdClickBlocked(this@Tab, request.url.toString())
+                        return true
+                    }
+                }
+                // 點到廣告：要跳去的網站在廣告清單裡就攔下，原頁面不動（覆蓋在播放鍵上的透明廣告連結）
+                if (target.isNotEmpty() && !isBlank && listener.adBlockFor(pageHost) && AdBlocker.blocks(target) && baseDomain(target) != baseDomain(pageHost)) {
+                    listener.onAdClickBlocked(this@Tab, request.url.toString())
+                    return true
+                }
+                if (isMediaUrl(request.url.toString()) && listener.onMediaUrl(this@Tab, request.url.toString())) return true
+                rememberShownPage()
+                return false
+            }
+
+            // IDM 式影片嗅探：只觀察、不攔截。網頁播放器（含 blob:／hls.js、iframe 內）實際請求的影片網址都會被記下
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): android.webkit.WebResourceResponse? {
+                val u = request.url.toString()
+                // 廣告／追蹤阻擋：子資源的網域在清單內就回空內容
+                if (!request.isForMainFrame) {
+                    val host = request.url.host.orEmpty()
+                    val page = pageHost
+                    if (host.isNotEmpty() && listener.adBlockFor(page) && AdBlocker.blocks(host) && baseDomain(host) != baseDomain(page)) {
+                        main.post { blockedCount++ }
+                        return AdBlocker.emptyResponse()
+                    }
+                }
+                if (!request.isForMainFrame && isSniffableMedia(u)) main.post {
+                    if (u !in media && media.size < 20) media.add(u)
+                    // 告訴網頁這頁有可下載的影片（全螢幕控制列的下載鈕據此顯示）
+                    webView.evaluateJavascript("window.__lqHasMedia=true", null)
+                }
+                return null
+            }
+
+            // 預設回傳 false 會讓整個 App 被結束（看起來就是閃退）：接手處理、重建這個分頁
+            override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
+                android.util.Log.w("LiquidTab", "renderer gone crashed=${detail.didCrash()} priority=${detail.rendererPriorityAtExit()}")
+                listener.onRendererGone(this@Tab)
+                return true
+            }
+
+            override fun onPageStarted(view: WebView, u: String, icon: Bitmap?) {
+                media.clear()
+                blockedCount = 0
+                pageHost = Uri.parse(u).host.orEmpty()
+                if (listener.adBlockFor(pageHost)) view.evaluateJavascript(AdBlocker.COSMETIC_JS, null)
+                translated = false
+                trTarget = null
+                trSent = 0
+                trDone = 0
+                url = u
+                loadFailed = false
+                themeColor = null
+                readerOn = false
+                findMatches = 0
+            }
+
+            override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                if (request.isForMainFrame) loadFailed = true
+                if (request.isForMainFrame && error.description?.contains("LOCAL_NETWORK_PERMISSION") == true) listener.onLocalNetworkNeeded(this@Tab)
+            }
+
+            override fun doUpdateVisitedHistory(view: WebView, u: String, isReload: Boolean) {
+                url = u
+                shownUrl = u
+                canGoBack = view.canGoBack()
+                canGoForward = view.canGoForward()
+            }
+
+            override fun onPageFinished(view: WebView, u: String) {
+                title = view.title.orEmpty()
+                if (legacyInject) view.evaluateJavascript(listener.injectedScript(), null)
+                // 同一頁可能觸發多次 onPageFinished（重新導向、SPA），只在網址改變時記錄一次
+                if (u != lastRecorded && !loadFailed) {
+                    lastRecorded = u
+                    listener.onVisited(this@Tab, u, title)
+                }
+                view.evaluateJavascript(THEME_COLOR_JS) { themeColor = parseCssColor(it.trim('"')) }
+                val host = Uri.parse(u).host
+                if (host != null) view.evaluateJavascript(ICON_JS) { r ->
+                    val icon = r.trim('"')
+                    if (icon.startsWith("http")) listener.onIcon(host.removePrefix("www."), icon)
+                }
+            }
+        }
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onProgressChanged(view: WebView, p: Int) { progress = p; if (p == 100) refreshing = false }
+            override fun onReceivedTitle(view: WebView, t: String?) { title = t.orEmpty() }
+            override fun onReceivedIcon(view: WebView, icon: Bitmap) { favicon = icon.asImageBitmap() }
+            override fun onShowCustomView(view: View, callback: CustomViewCallback) = listener.onCustomView(view, callback)
+            override fun onHideCustomView() = listener.onCustomView(null, null)
+
+            // 只接受使用者點擊開的新視窗；新分頁的第一個網址若在廣告清單裡，onAdClickBlocked 會把它關掉
+            override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message): Boolean {
+                if (!isUserGesture) return false
+                // 彈窗廣告：點的不是連結（影片、按鈕、空白處），網頁卻趁這次點擊開新視窗 → 擋掉，原頁面不動
+                val hit = view.hitTestResult.type
+                val onLink = hit == WebView.HitTestResult.SRC_ANCHOR_TYPE || hit == WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE
+                if (!onLink && listener.blockRedirects()) {
+                    listener.onPopupBlocked(this@Tab)
+                    return false
+                }
+                val popup = listener.onPopup(this@Tab)
+                (resultMsg.obj as? WebView.WebViewTransport)?.webView = popup.webView
+                resultMsg.sendToTarget()
+                return true
+            }
+        }
+        installVideoBridge()
+        webView.setOnScrollChangeListener { v, _, y, _, oldY ->
+            listener.onScroll(this, y - oldY, !v.canScrollVertically(1))
+        }
+        webView.setDownloadListener { u, ua, cd, mime, _ -> listener.onDownload(this, u, ua, cd, mime) }
+        webView.setFindListener { active, count, done -> if (done) { findIndex = if (count == 0) 0 else active + 1; findMatches = count } }
+        // 記住觸控位置，長按時用來決定預覽卡片從哪裡浮現
+        webView.setOnTouchListener { _, e ->
+            touchX = e.x
+            touchY = e.y
+            trackPull(e)
+            false
+        }
+        webView.setOnLongClickListener {
+            val r = webView.hitTestResult
+            when (r.type) {
+                WebView.HitTestResult.SRC_ANCHOR_TYPE -> {
+                    listener.onLongPress(this, HitResult(r.extra, null, touchX, touchY)); true
+                }
+                WebView.HitTestResult.IMAGE_TYPE -> {
+                    listener.onLongPress(this, HitResult(null, r.extra, touchX, touchY)); true
+                }
+                WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE -> {
+                    // 圖片連結：hitTestResult 只給圖片網址，連結網址需另外向 WebView 要
+                    val image = r.extra
+                    val x = touchX
+                    val y = touchY
+                    val handler = Handler(Looper.getMainLooper()) { msg ->
+                        listener.onLongPress(this, HitResult(msg.data.getString("url"), image, x, y)); true
+                    }
+                    webView.requestFocusNodeHref(handler.obtainMessage())
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    /**
+     * 影片偵測與 JS 手勢層：在每個頁面（含 iframe）文件開始時注入腳本，並透過 WebMessageListener 接收訊息。
+     * 舊版 WebView 不支援時，改在頁面開始／完成時以 evaluateJavascript 注入（腳本本身會避免重複執行）。
+     */
+    private fun installVideoBridge() {
+        val script = listener.injectedScript()
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            WebViewCompat.addDocumentStartJavaScript(webView, script, setOf("*"))
+        } else {
+            legacyInject = true
+        }
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+            WebViewCompat.addWebMessageListener(webView, "LiquidBridge", setOf("*")) { _, message, _, _, _ ->
+                val json = runCatching { JSONObject(message.data ?: return@addWebMessageListener) }.getOrNull() ?: return@addWebMessageListener
+                when (json.optString("type")) {
+                    "haptic" -> webView.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                    "nopull" -> { pullArmed = false; pull = 0f }
+                    "download_best" -> listener.onDownloadBest(this)
+                    "tr" -> {
+                        val arr = json.optJSONArray("texts") ?: return@addWebMessageListener
+                        listener.onTranslateBatch(this, json.optInt("id"), List(arr.length()) { arr.optString(it) })
+                    }
+                    "tr_state" -> { trSent = json.optInt("sent"); trDone = json.optInt("done") }
+                    "download" -> json.optString("src").takeIf { it.startsWith("http") }?.let { listener.onVideoDownload(this, it, json.optString("title").ifBlank { title }) }
+                    "native" -> {
+                        val src = json.optString("src").takeIf { it.startsWith("http") } ?: return@addWebMessageListener
+                        val dpr = json.optDouble("dpr", 1.0).toFloat()
+                        val from = json.optJSONArray("rect")?.let { r ->
+                            val loc = IntArray(2).also { webView.getLocationInWindow(it) }
+                            val l = loc[0] + r.getDouble(0).toFloat() * dpr
+                            val t = loc[1] + r.getDouble(1).toFloat() * dpr
+                            androidx.compose.ui.geometry.Rect(l, t, l + r.getDouble(2).toFloat() * dpr, t + r.getDouble(3).toFloat() * dpr)
+                        }
+                        listener.onNativeVideo(this, src, json.optString("title").ifBlank { title }, from, (json.optDouble("time", 0.0) * 1000).toLong())
+                    }
+                }
+            }
+        }
+    }
+
+    private var legacyInject = false
+
+    fun load(input: String) {
+        val target = toUrl(input, listener.searchPrefix())
+        if (isMediaUrl(target) && listener.onMediaUrl(this, target, typed = true)) return
+        rememberShownPage()
+        url = target
+        // WebView 還沒放上畫面（寬度 0）就載入的話，網頁會以 0 寬度排版，之後可能留下錯誤的縮放與水平捲動：
+        // 等量到實際寬度再載入
+        whenSized {
+            // 不支援 allow-list 的 WebView：至少把主頁面請求的 X-Requested-With 覆寫成空值
+            if (asIPhone) webView.loadUrl(target, mapOf("X-Requested-With" to "")) else webView.loadUrl(target)
+        }
+    }
+
+    private fun whenSized(block: () -> Unit) {
+        if (webView.width > 0) return block()
+        webView.addOnLayoutChangeListener(object : View.OnLayoutChangeListener {
+            override fun onLayoutChange(v: View, l: Int, t: Int, r: Int, b: Int, ol: Int, ot: Int, or: Int, ob: Int) {
+                if (v.width <= 0) return
+                v.removeOnLayoutChangeListener(this)
+                block()
+            }
+        })
+    }
+
+    fun setDesktopMode(on: Boolean) {
+        desktop = on
+        applyIdentity(reload = true)
+    }
+
+    fun setIdentifyAsIPhone(on: Boolean) {
+        if (asIPhone == on) return
+        asIPhone = on
+        applyIdentity(reload = !isBlank)
+    }
+
+    /**
+     * 依「iPhone 識別」與「桌面版」組合設定 User-Agent、Client Hints 與頁面中的 navigator 屬性：
+     *  iPhone＋行動版 → iPhone Safari；iPhone＋桌面版 → macOS Safari；
+     *  Android＋桌面版 → 桌面 Chrome；Android＋行動版 → WebView 預設。
+     */
+    private fun applyIdentity(reload: Boolean) {
+        val ctx = webView.context
+        webView.settings.userAgentString = when {
+            asIPhone && desktop -> MAC_SAFARI_UA
+            asIPhone -> IPHONE_SAFARI_UA
+            desktop -> desktopUserAgent(ctx)
+            else -> null
+        }
+        // Client Hints（Sec-CH-UA-Platform 等標頭）：與 User-Agent 一致
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) {
+            if (asIPhone) WebSettingsCompat.setUserAgentMetadata(
+                webView.settings,
+                UserAgentMetadata.Builder()
+                    // Safari 不送 Sec-CH-UA：品牌只留中性的佔位品牌，不出現 Android WebView／Chromium
+                    .setBrandVersionList(
+                        listOf(UserAgentMetadata.BrandVersion.Builder().setBrand("Not A(Brand").setMajorVersion("99").setFullVersion("99.0.0.0").build()),
+                    )
+                    .setFullVersion("26.0")
+                    .setPlatform(if (desktop) "macOS" else "iOS")
+                    .setPlatformVersion(if (desktop) "10.15.7" else "18.6")
+                    .setMobile(!desktop)
+                    .setModel("")
+                    .build(),
+            )
+            else WebSettingsCompat.setUserAgentMetadata(webView.settings, UserAgentMetadata.Builder().build())
+        }
+        // 頁面 JS 讀到的 navigator.platform／vendor 也改成 Apple；Safari 沒有 userAgentData
+        iosShim?.remove()
+        iosShim = null
+        if (asIPhone && WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            iosShim = WebViewCompat.addDocumentStartJavaScript(webView, iosNavigatorShim(desktop), setOf("*"))
+        }
+        if (reload) webView.reload()
+    }
+
+    fun setTextSize(percent: Int) {
+        textZoom = percent.coerceIn(50, 300)
+        webView.settings.textZoom = textZoom
+    }
+
+    fun setJavaScriptEnabled(on: Boolean) {
+        javaScript = on
+        webView.settings.javaScriptEnabled = on
+        webView.reload()
+    }
+
+    fun find(query: String) {
+        if (query.isEmpty()) clearFind() else webView.findAllAsync(query)
+    }
+
+    fun findNext(forward: Boolean) = webView.findNext(forward)
+
+    fun clearFind() {
+        webView.clearMatches()
+        findMatches = 0
+        findIndex = 0
+    }
+
+    /** 閱讀器模式：注入 assets/reader.js 把文章轉成乾淨排版；再按一次重新載入原頁。 */
+    fun toggleReader(script: String) {
+        if (readerOn) {
+            readerOn = false
+            webView.reload()
+        } else {
+            webView.evaluateJavascript(script) { ok -> readerOn = ok == "true" }
+        }
+    }
+
+    /**
+     * 告訴網頁底部（直向）或頂部（橫向）被浮動控制列蓋住多少 px：
+     * 併入系統列的 WindowInsets，WebView 會換算成 CSS env(safe-area-inset-*)，
+     * 支援安全區域的網站（為 iPhone 最佳化的網站多半支援）就會把底部內容推到網址列上方，和 iOS Safari 一致。
+     */
+    fun setControlsInset(bottomPx: Int, topPx: Int) {
+        controlsBottomPx = bottomPx
+        ViewCompat.setOnApplyWindowInsetsListener(webView) { v, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+            val status = insets.getInsets(WindowInsetsCompat.Type.statusBars())
+            val merged = WindowInsetsCompat.Builder(insets)
+                .setInsets(WindowInsetsCompat.Type.navigationBars(), Insets.of(bars.left, bars.top, bars.right, maxOf(bars.bottom, bottomPx)))
+                .setInsets(WindowInsetsCompat.Type.statusBars(), Insets.of(status.left, maxOf(status.top, topPx), status.right, status.bottom))
+                .build()
+            ViewCompat.onApplyWindowInsets(v, merged)
+        }
+        ViewCompat.requestApplyInsets(webView)
+    }
+
+    /** 文章縮圖（og:image）與標題，加入閱讀列表時使用。 */
+    fun pageMeta(onResult: (title: String, image: String?) -> Unit) {
+        webView.evaluateJavascript(META_JS) { r ->
+            val img = r.trim('"').takeIf { it.startsWith("http") }
+            onResult(title, img)
+        }
+    }
+
+    private fun rememberShownPage() {
+        val shown = shownUrl ?: return
+        capture(onDone = { pageShots[shown] = it })
+    }
+
+    /** 上一頁離開前留下的畫面（沒有則 null）。 */
+    fun previousShot(): ImageBitmap? {
+        val list = webView.copyBackForwardList()
+        val prev = list.getItemAtIndex(list.currentIndex - 1) ?: return null
+        return pageShots[prev.url]
+    }
+
+    fun nextShot(): ImageBitmap? {
+        val list = webView.copyBackForwardList()
+        val next = list.getItemAtIndex(list.currentIndex + 1) ?: return null
+        return pageShots[next.url]
+    }
+
+    /**
+     * 擷取目前畫面縮圖（0.4 倍）給分頁總覽。
+     * ponytail: 在主執行緒同步繪製（約數毫秒），只在進入總覽／離開頁面時呼叫；第 8 階段若量到掉幀再改成 PixelCopy 非同步。
+     */
+    /**
+     * 目前分頁：渲染程序設為重要（不被系統降速，捲動更順）；
+     * 背景分頁恢復預設，記憶體與耗電讓給前景。
+     */
+    /** 網頁上 <video> 由上到下的網址（下載選單排序用；串流影片是 blob: 網址，對不到偵測清單） */
+    suspend fun videoSourcesInOrder(): List<String> = kotlinx.coroutines.suspendCancellableCoroutine { c ->
+        webView.evaluateJavascript(
+            "JSON.stringify(Array.prototype.map.call(document.querySelectorAll('video'),function(v){var s=v.querySelector('source');return v.currentSrc||v.src||(s&&s.src)||''}))",
+        ) { r ->
+            val list = runCatching { org.json.JSONArray(org.json.JSONTokener(r).nextValue() as String) }.getOrNull()
+            c.resumeWith(Result.success(if (list == null) emptyList() else List(list.length()) { list.optString(it) }.filter { it.startsWith("http") }))
+        }
+    }
+
+    /** 擋下廣告點擊後，讓蓋在影片上的透明廣告層點擊穿透（video_detect.js 的 __lqUnblock） */
+    fun unblockLastTap() = webView.evaluateJavascript("window.__lqUnblock&&window.__lqUnblock()", null)
+
+    /** 下拉重新整理：目前下拉距離（px，未阻尼）與是否正在重新整理（轉圈直到載入完成） */
+    var pull by mutableFloatStateOf(0f)
+        private set
+    var refreshing by mutableStateOf(false)
+        private set
+    private var pullStartY = 0f
+    private var pullArmed = false
+    private val pullThreshold get() = 96f * webView.resources.displayMetrics.density
+
+    // 只在網頁已經捲到最頂、手指往下拉時啟動；網頁一開始往上捲或多指就取消。只觀察觸控，不攔截（網頁照常收到事件）
+    // ponytail: 用 canScrollVertically 判斷頂端，內層自己捲動的網頁（body 不捲）可能誤判；要更準再用 JS 回報 scrollTop
+    private fun trackPull(e: android.view.MotionEvent) {
+        when (e.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                pullStartY = e.y
+                pullArmed = !refreshing && !isBlank && webView.scrollY == 0 && !webView.canScrollVertically(-1)
+                pull = 0f
+            }
+            android.view.MotionEvent.ACTION_MOVE -> if (pullArmed) {
+                val dy = e.y - pullStartY
+                if (dy < 0f || webView.canScrollVertically(-1)) { pullArmed = false; pull = 0f }
+                else {
+                    if ((pull < pullThreshold) != (dy < pullThreshold)) webView.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                    pull = dy
+                }
+            }
+            android.view.MotionEvent.ACTION_UP -> {
+                if (pullArmed && pull >= pullThreshold) { refreshing = true; refresh() }
+                pullArmed = false
+                pull = 0f
+            }
+            android.view.MotionEvent.ACTION_CANCEL, android.view.MotionEvent.ACTION_POINTER_DOWN -> { pullArmed = false; pull = 0f }
+        }
+    }
+
+    /** 重新整理：網頁還沒真的載入過（還原中、等寬度）就重新載入網址；載入中也直接重來 */
+    fun refresh() {
+        val cur = webView.url
+        if (cur.isNullOrEmpty() || cur == "about:blank") {
+            val target = pendingUrl ?: url
+            pendingUrl = null
+            if (target.isNotBlank() && target != "about:blank") load(target) else refreshing = false
+        } else {
+            webView.stopLoading()
+            webView.reload()
+        }
+    }
+
+    /** 停止載入；進度設回完成，按鈕才會變回「重新整理」（否則卡住的頁面會一直顯示停止鈕） */
+    fun stop() {
+        webView.stopLoading()
+        progress = 100
+        refreshing = false
+    }
+
+    /** 由哪個分頁的彈出視窗開出來的；在這個分頁沒有上一頁時右滑返回，會關掉它回到來源頁 */
+    var opener: Tab? = null
+
+    /** 從上次工作階段還原、還沒載入的網址：第一次切到這個分頁時才載入（重開 App 不會一次載入所有分頁） */
+    private var pendingUrl: String? = null
+
+    fun restore(savedUrl: String, savedTitle: String) {
+        url = savedUrl
+        title = savedTitle
+        pendingUrl = savedUrl
+    }
+
+    fun setForeground(on: Boolean) {
+        if (on) pendingUrl?.let { pendingUrl = null; load(it) }
+        // 背景分頁暫停動畫與額外處理，省 CPU 與電量；切回來時恢復。WebView 已銷毀時（分頁剛被關閉或重建）不做事
+        runCatching { if (on) webView.onResume() else webView.onPause() }
+        // 不開 offscreenPreRaster：會讓渲染程序多佔大量記憶體，小米 HyperOS 等積極回收的系統會因此結束渲染程序
+        runCatching { webView.setRendererPriorityPolicy(if (on) WebView.RENDERER_PRIORITY_IMPORTANT else WebView.RENDERER_PRIORITY_BOUND, true) }
+    }
+
+    /** 分頁總覽用的縮圖；onDone 在縮圖更新後（或無法擷取時）呼叫 */
+    fun snapshot(onDone: () -> Unit = {}) {
+        if (isBlank) { onDone(); return }
+        capture({ thumbnail = it; onDone() }, onFail = onDone)
+    }
+
+    /** 底部控制列蓋住的高度：擷取畫面時排除，縮圖裡才不會有網址列 */
+    private var controlsBottomPx = 0
+
+    /**
+     * 擷取目前網頁畫面（0.4 倍）：用 PixelCopy 從已合成的視窗複製，在 GPU／RenderThread 完成、非同步回呼，
+     * 不像 webView.draw() 會在主執行緒用 CPU 重畫整個網頁（點連結、開分頁總覽時會卡幾十毫秒）。
+     */
+    /** 全解析度的目前畫面（面板滑動期間暫時代替網頁，網頁不必每幀重畫） */
+    fun freezeFrame(onDone: (ImageBitmap?) -> Unit) = capture({ onDone(it) }, onFail = { onDone(null) }, scale = 1f)
+
+    private fun capture(onDone: (ImageBitmap) -> Unit, onFail: () -> Unit = {}, scale: Float = 0.4f) {
+        val activity = (webView.context as? android.content.MutableContextWrapper)?.baseContext as? android.app.Activity
+        val w = webView.width
+        val h = webView.height - controlsBottomPx
+        // 網頁要真的顯示在螢幕上才擷取（擷取的是螢幕畫面）：被分頁總覽蓋住、INVISIBLE 或不是目前分頁時跳過，
+        // 否則會拍到總覽畫面或別的分頁，存成錯的縮圖
+        if (activity == null || w <= 0 || h <= 0 || !webView.isAttachedToWindow || !webView.isShown) { onFail(); return }
+        val loc = IntArray(2).also { webView.getLocationInWindow(it) }
+        val bmp = Bitmap.createBitmap((w * scale).toInt().coerceAtLeast(1), (h * scale).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+        runCatching {
+            android.view.PixelCopy.request(
+                activity.window, android.graphics.Rect(loc[0], loc[1], loc[0] + w, loc[1] + h), bmp,
+                { r -> if (r == android.view.PixelCopy.SUCCESS) onDone(bmp.asImageBitmap()) else onFail() },
+                android.os.Handler(android.os.Looper.getMainLooper()),
+            )
+        }.onFailure { onFail() }
+    }
+}
+
+/**
+ * 在 <html> 結尾（body 之後）加一段高度為 safe-area-inset-bottom 的空白：不影響網頁本身版面，
+ * 只讓整頁可以多捲一點，被浮動控制列蓋住的頁尾就能捲上來。只作用於主頁面（iframe 不加）。
+ */
+/**
+ * 把貼在畫面底部的固定元素（cookie 橫幅、底部提示列、聊天按鈕）往上推到浮動控制列上方，否則會被網址列擋住。
+ * 控制列高度＝safe-area-inset-bottom（App 透過 setControlsInset 提供）。只處理寬度過半、位在畫面下半、高度不到 6 成的
+ * fixed／sticky 元素（全螢幕彈窗不動）；先用 offsetParent===null 篩出固定定位的元素，不必對整頁算樣式。
+ * 頁面載入、DOM 變動（節流）與前 30 秒每 2 秒各掃一次（橫幅常晚幾秒才出現）。
+ */
+private const val LIFT_FIXED_JS = """(function(){
+  if (window !== window.top || window.__lqLift) return;
+  window.__lqLift = true;
+  function inset() {
+    var d = document.createElement('div');
+    d.style.cssText = 'position:fixed;visibility:hidden;height:env(safe-area-inset-bottom,0px)';
+    document.documentElement.appendChild(d);
+    var h = d.offsetHeight; d.remove(); return h;
+  }
+  function scan() {
+    if (!document.body) return;
+    var gap = inset(); if (!gap) return;
+    var vh = window.innerHeight, vw = window.innerWidth;
+    var all = document.body.getElementsByTagName('*');
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      if (el.offsetParent !== null || el.__lqLifted) continue;
+      var cs = getComputedStyle(el);
+      if (cs.position !== 'fixed' && cs.position !== 'sticky') continue;
+      var r = el.getBoundingClientRect();
+      if (r.width < vw * 0.5 || r.height === 0 || r.height > vh * 0.6 || r.top < vh * 0.4 || r.bottom < vh - gap) continue;
+      var b = parseFloat(cs.bottom) || 0;
+      el.style.setProperty('bottom', (b + gap) + 'px', 'important');
+      el.__lqLifted = true;
+    }
+  }
+  var t = 0;
+  function later() { clearTimeout(t); t = setTimeout(scan, 400); }
+  document.addEventListener('DOMContentLoaded', function () {
+    scan();
+    new MutationObserver(later).observe(document.body, { childList: true, subtree: true });
+    var n = 0, iv = setInterval(function () { scan(); if (++n >= 15) clearInterval(iv); }, 2000);
+  });
+  window.addEventListener('load', scan);
+})();"""
+
+private const val END_SPACER_JS = """(function(){
+  if (window !== window.top) return;
+  var s = document.createElement('style');
+  s.textContent = 'html::after{content:"";display:block;height:calc(env(safe-area-inset-bottom,0px) + 16px);pointer-events:none}';
+  (document.head || document.documentElement).appendChild(s);
+})();"""
+
+/** iOS 26 Safari：OS 版本在 UA 中固定為 18_6，Safari 版本為 26.0 */
+const val IPHONE_SAFARI_UA =
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1"
+const val MAC_SAFARI_UA =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
+
+private fun iosNavigatorShim(desktop: Boolean) = """(function(){
+  try {
+    var p = Navigator.prototype, d = function (k, v) { Object.defineProperty(p, k, { get: function () { return v; }, configurable: true }); };
+    d('platform', '${if (desktop) "MacIntel" else "iPhone"}');
+    d('vendor', 'Apple Computer, Inc.');
+    d('maxTouchPoints', ${if (desktop) 0 else 5});
+    d('userAgentData', undefined);
+  } catch (e) {}
+})();"""
+
+/** 桌面版 User-Agent：沿用 WebView 的 Chrome 版本號，換成桌面 Linux 平台並移除 Mobile。 */
+fun desktopUserAgent(context: Context): String {
+    val chrome = Regex("Chrome/[\\d.]+").find(WebSettings.getDefaultUserAgent(context))?.value ?: "Chrome/140.0.0.0"
+    return "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) $chrome Safari/537.36"
+}
+
+private const val META_JS = """(function(){var m=document.querySelector('meta[property="og:image"],meta[name="twitter:image"]');return m?m.content:''})()"""
+
+/** 使用者輸入轉成網址：有協定直接用、像網域就補 https、其他交給搜尋引擎。 */
+fun toUrl(input: String, searchPrefix: String): String {
+    val s = input.trim()
+    return when {
+        s.startsWith("http://") || s.startsWith("https://") || s.startsWith("about:") -> s
+        ' ' !in s && '.' in s -> "https://$s"
+        else -> searchPrefix + Uri.encode(s)
+    }
+}
+
+/** 狀態列顏色：優先 theme-color，沒有就用頁面背景色（body → html），都透明則回傳空字串。 */
+private const val THEME_COLOR_JS = """(function(){
+  var m=document.querySelector('meta[name="theme-color"]');
+  if(m&&m.content)return m.content;
+  var t='rgba(0, 0, 0, 0)',b=getComputedStyle(document.body).backgroundColor;
+  if(b&&b!==t)return b;
+  var h=getComputedStyle(document.documentElement).backgroundColor;
+  return h&&h!==t?h:'#ffffff';
+})()"""
+
+/** 找出頁面上最大的圖示（apple-touch-icon 預設視為 180px），小於 48px 不採用。 */
+private const val ICON_JS = """(function(){var best='',size=0;
+document.querySelectorAll('link[rel~="icon"],link[rel^="apple-touch-icon"]').forEach(function(l){
+var v=(l.sizes&&l.sizes.value)||'';var s=parseInt(v.split('x')[0])||(l.rel.indexOf('apple')>=0?180:16);
+if(s>size){size=s;best=l.href}});return size>=48?best:''})()"""
+
+/** 解析 CSS 顏色字串（#rgb、#rrggbb、rgb()、rgba()）。 */
+fun parseCssColor(s: String): Color? {
+    if (s.isBlank()) return null
+    if (s.startsWith("#")) {
+        val hex = if (s.length == 4) "#" + s.drop(1).map { "$it$it" }.joinToString("") else s
+        return runCatching { Color(android.graphics.Color.parseColor(hex)) }.getOrNull()
+    }
+    val n = Regex("[\\d.]+").findAll(s).map { it.value.toFloat() }.toList()
+    if (!s.startsWith("rgb") || n.size < 3) return null
+    if (n.size >= 4 && n[3] == 0f) return null
+    return Color(n[0] / 255f, n[1] / 255f, n[2] / 255f)
+}
+
+/**
+ * 可下載的影片請求：m3u8 播放清單與 mp4／webm 等整檔影片。
+ * 排除 HLS 片段（.ts／.m4s）與 DASH（.mpd，引擎尚不支援）；同一播放清單的子清單也會被記下，由使用者選擇。
+ */
+fun isSniffableMedia(url: String): Boolean {
+    if (!url.startsWith("http")) return false
+    val path = url.substringBefore('?').substringBefore('#').lowercase()
+    return path.endsWith(".m3u8") || path.endsWith(".mp4") || path.endsWith(".webm") || path.endsWith(".m4v") ||
+        path.endsWith(".mov") || path.endsWith(".mkv") || path.endsWith(".flv")
+}

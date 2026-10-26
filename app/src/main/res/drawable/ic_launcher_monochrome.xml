@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 主題圖示（Android 13+ 依桌布上色）用的單色版：球框＋液體＋高光 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <group>
+        <clip-path android:pathData="M54,29.5a24.5,24.5 0 1,1 0,49a24.5,24.5 0 1,1 0,-49z" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M26,57C33,51.5 41,51.5 48,56S63,62.5 70,57.5S78,53 82,54.5L82,82L26,82Z" />
+    </group>
+    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="3"
+        android:pathData="M54,28a26,26 0 1,1 0,52a26,26 0 1,1 0,-52z" />
+    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="3" android:strokeLineCap="round"
+        android:pathData="M37,47A18.5,18.5 0 0,1 47.5,36" />
+</vector>

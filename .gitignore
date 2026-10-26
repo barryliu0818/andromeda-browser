@@ -1,0 +1,23 @@
+# 建置輸出與 IDE
+build/
+.gradle/
+.idea/
+.kotlin/
+*.iml
+.DS_Store
+captures/
+.externalNativeBuild/
+.cxx/
+
+# 金鑰與簽章：永遠不進版本控制
+local.properties
+keystore.properties
+keystore/
+*.jks
+*.keystore
+*.p12
+
+# 安裝包
+dist/
+*.apk
+*.aab
