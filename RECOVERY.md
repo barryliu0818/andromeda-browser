@@ -21,3 +21,9 @@
 
 ## 簽章
 原本的簽章金鑰無法救回。用新金鑰建置的版本不能覆蓋安裝舊版，需先解除安裝舊版。
+
+## 2026-10-26 接手後重寫（Windows）
+- 已重寫：`settings.gradle.kts`、`app/build.gradle.kts`（personal／share 兩版）、`gradle/libs.versions.toml`、`gradle.properties`、`gradle/wrapper/gradle-wrapper.properties`、`AndroidManifest.xml`、`app/proguard-rules.pro`
+- 根目錄 `build.gradle.kts` 移除了把建置輸出導到 `~/Desktop/AndroidDev.nosync` 的設定（專案已在不同步的 `~/Developer/andromeda`）
+- Haze：原本鎖定的 `2.1.0-20261022.145728-86` 已被快照倉庫刪除，改鎖 2026-10-26 的快照（haze -152、haze-blur／haze-glass -150），API 是否相容要建置後才知道
+- 仍缺（記錄裡沒有）：`res/font/material_symbols_rounded.ttf`、`res/drawable/logo_google`、`logo_bing`、`logo_yandex`、Gradle wrapper 的 `gradlew`／`gradle-wrapper.jar`、`baselineprofile/src`（產生器與 Macrobenchmark 測試）
