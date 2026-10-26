@@ -145,6 +145,11 @@ import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import com.liquid.browser.ui.glass.LocalHideBlurWindows
+import androidx.lifecycle.repeatOnLifecycle
+
+/** 除錯用：沒有原生 backdrop 的機種也強制走系統模糊視窗，方便在其他裝置上測試 */
+private const val DEBUG_FORCE_SYSBLUR = false
 
 /** 瀏覽主畫面：全螢幕網頁（或起始頁）＋浮動玻璃控制列；直向在底部、橫向在頂部置中。 */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
@@ -179,7 +184,7 @@ fun BrowserScreen(vm: BrowserViewModel) {
     val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
     // 只在 App 顯示於前景時取樣：背景時視窗沒有畫面，取樣沒有意義又耗電
     LaunchedEffect(landscape) {
-        androidx.lifecycle.repeatOnLifecycle(lifecycle, androidx.lifecycle.Lifecycle.State.RESUMED) {
+        lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
         while (true) {
             delay(GlassTokens.SampleIntervalMs)
             val w = activity?.window?.decorView?.width ?: break
@@ -625,7 +630,17 @@ fun BrowserScreen(vm: BrowserViewModel) {
                                 onTabs = { enterOverview(null) },
                                 onDownloads = { pageActions.onDownloads() },
                                 onPageMenu = { anchor -> menu.show(pageMenu(toMain(anchor), tab, vm, menuTone, context, pageActions)) },
-                                    onTabsLongPress = { anchor ->
+                                // 長按返回：列出上一頁歷史（最近的在最上面），點一下直接跳回那一頁
+                                onBackLongPress = { anchor ->
+                                    val list = tab.webView.copyBackForwardList()
+                                    val items = (1..minOf(list.currentIndex, 8)).mapNotNull { n ->
+                                        list.getItemAtIndex(list.currentIndex - n)?.let { h ->
+                                            MenuItem(h.title?.takeIf { it.isNotBlank() } ?: h.url, "arrow_back") { tab.webView.goBackOrForward(-n) }
+                                        }
+                                    }
+                                    if (items.isNotEmpty()) menu.show(MenuSpec(toMain(anchor), items))
+                                },
+                                onTabsLongPress = { anchor ->
                                     val n = vm.visibleTabs().size
                                     menu.show(
                                         MenuSpec(
