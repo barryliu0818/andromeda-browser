@@ -745,6 +745,17 @@ private const val LIFT_FIXED_JS = """(function(){
     document.documentElement.appendChild(d);
     var h = d.offsetHeight; d.remove(); return h;
   }
+  // 元素底部留白：自己的 padding-bottom，或貼在最底下的子元素（常見寫法是放一個高度＝安全區域的空 div）
+  function padBottom(el) {
+    var p = parseFloat(getComputedStyle(el).paddingBottom) || 0;
+    var last = el.lastElementChild;
+    if (last) {
+      var lr = last.getBoundingClientRect(), er = el.getBoundingClientRect();
+      if (Math.abs(lr.bottom - er.bottom) < 2 && !last.textContent.trim() && !last.querySelector('img,svg,canvas,video')) p = Math.max(p, lr.height);
+      p = Math.max(p, parseFloat(getComputedStyle(last).paddingBottom) || 0);
+    }
+    return p;
+  }
   function scan() {
     if (!document.body) return;
     var gap = inset(); if (!gap) return;
@@ -757,6 +768,8 @@ private const val LIFT_FIXED_JS = """(function(){
       if (cs.position !== 'fixed' && cs.position !== 'sticky') continue;
       var r = el.getBoundingClientRect();
       if (r.width < vw * 0.5 || r.height === 0 || r.height > vh * 0.6 || r.top < vh * 0.4 || r.bottom < vh - gap) continue;
+      // 網站自己已經用 safe-area-inset-bottom 留了底部空間（例如京東的底部導覽列）：再往上推會多出一段空白
+      if (padBottom(el) >= gap - 1) { el.__lqLifted = true; continue; }
       var b = parseFloat(cs.bottom) || 0;
       el.style.setProperty('bottom', (b + gap) + 'px', 'important');
       el.__lqLifted = true;
