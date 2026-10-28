@@ -478,8 +478,8 @@ fun BrowserScreen(vm: BrowserViewModel) {
                             } else Modifier,
                         ),
                 ) {
-                    // 輸入、選單、面板開著（含關閉動畫）時首頁的玻璃視窗先收起，不會壓在選單、面板、輸入框上面
-                    if (tab.isBlank) androidx.compose.runtime.CompositionLocalProvider(LocalHideBlurWindows provides (focused || menu.spec != null || sheet.content != null || LocalHideBlurWindows.current)) {
+                    // 輸入、選單、面板、分頁總覽開著（含關閉動畫）時首頁的玻璃視窗先收起，不會壓在選單、面板、輸入框、總覽上面
+                    if (tab.isBlank) androidx.compose.runtime.CompositionLocalProvider(LocalHideBlurWindows provides (focused || overview || menu.spec != null || sheet.content != null || LocalHideBlurWindows.current)) {
                         HomePage(vm, Modifier.fillMaxSize().background(bg), onSearch = { query = TextFieldValue(); typed = false; focused = true }) { tab.load(it) }
                     }
                     else Column(Modifier.fillMaxSize()) {
