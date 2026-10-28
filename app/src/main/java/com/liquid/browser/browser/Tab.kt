@@ -100,6 +100,8 @@ class Tab(
         fun injectedScript(): String
         /** Android 17 區域網路權限不足而無法載入（ERR_LOCAL_NETWORK_PERMISSION_MISSING） */
         fun onLocalNetworkNeeded(tab: Tab)
+        /** App 專用連結（taobao://、intent://…）；gesture＝使用者點擊觸發 */
+        fun onAppLink(tab: Tab, url: String, gesture: Boolean)
     }
 
     val webView = WebView(context)
@@ -231,6 +233,11 @@ class Tab(
         webView.webViewClient = object : WebViewClient() {
             // 點連結離開頁面前先留下舊頁面的畫面（onPageStarted 時新頁面已提交、舊畫面已不在），邊緣滑動返回時使用
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                // App 專用連結（含 iframe 裡的）：WebView 打不開，交給 ViewModel 開 App 或先詢問
+                if (AppLinks.isAppScheme(request.url)) {
+                    listener.onAppLink(this@Tab, request.url.toString(), request.hasGesture() && request.isForMainFrame)
+                    return true
+                }
                 if (!request.isForMainFrame) return false
                 // 跳轉阻擋：頁面沒被點擊就自己跳到別的網站（伺服器轉址除外）
                 val target = request.url.host.orEmpty()

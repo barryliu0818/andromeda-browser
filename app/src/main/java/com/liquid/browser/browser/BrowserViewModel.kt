@@ -8,6 +8,7 @@ import com.liquid.browser.core.t
 
 import android.app.Activity
 import android.app.Application
+import android.content.Intent
 import android.content.MutableContextWrapper
 import android.net.Uri
 import android.view.ViewGroup
@@ -122,6 +123,63 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     var localNetworkRequest by mutableStateOf<Tab?>(null)
 
     override fun onLocalNetworkNeeded(tab: Tab) { localNetworkRequest = tab }
+
+    /** 跳轉 App 的提示列（BrowserScreen 顯示）；一段時間沒按就自動收起 */
+    var appPrompt by mutableStateOf<AppPrompt?>(null)
+        private set
+
+    /** 已檢查過「有沒有專屬 App」的網站：同一個網站只提示一次 */
+    private val suggestedSites = HashSet<String>()
+
+    // 點擊開的直接開 App；網頁自己觸發的先詢問；沒裝 App 就改開備用網址（intent:// 的 browser_fallback_url）
+    override fun onAppLink(tab: Tab, url: String, gesture: Boolean) {
+        val intent = AppLinks.toIntent(url) ?: return
+        val target = AppLinks.target(webContext, intent)
+        when {
+            target == null -> {
+                val fallback = AppLinks.fallbackUrl(intent)
+                when {
+                    fallback != null -> tab.load(fallback)
+                    gesture && intent.`package` != null -> launchApp(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=${intent.`package`}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    gesture && tab == current -> showToast(t("沒有安裝可開啟此連結的 App"))
+                }
+            }
+            gesture -> {
+                launchApp(intent)
+                // 只為了跳轉而開的彈出分頁：關掉回到來源頁
+                val opener = tab.opener?.takeIf { it in tabs }
+                if (opener != null && (tab.isBlank || tab.url == POPUP_PENDING)) { close(tab); select(opener) }
+            }
+            tab == current -> showAppPrompt(AppPrompt(tab, intent, target.label, target.icon, ask = true))
+        }
+    }
+
+    /** 網頁載入完成：這個網站有專屬 App（淘寶、知乎…）就提示可以改用 App 開啟 */
+    private fun suggestApp(tab: Tab, url: String) {
+        val site = Uri.parse(url).host?.let(::baseDomain) ?: return
+        if (!suggestedSites.add(site)) return
+        viewModelScope.launch {
+            val found = withContext(Dispatchers.Default) {
+                AppLinks.nativeAppFor(webContext, url)?.let { intent -> AppLinks.target(webContext, intent)?.let { intent to it } }
+            } ?: return@launch
+            if (tab == current && tab.url == url && appPrompt == null) showAppPrompt(AppPrompt(tab, found.first, found.second.label, found.second.icon, ask = false))
+        }
+    }
+
+    private fun showAppPrompt(p: AppPrompt) {
+        appPrompt = p
+        viewModelScope.launch {
+            delay(if (p.ask) 8000 else 6000)
+            if (appPrompt === p) appPrompt = null
+        }
+    }
+
+    fun dismissAppPrompt() { appPrompt = null }
+
+    fun launchApp(intent: Intent) {
+        appPrompt = null
+        runCatching { webContext.startActivity(intent) }.onFailure { showToast(t("無法開啟 App")) }
+    }
 
     override fun onNativeVideo(tab: Tab, src: String, title: String, from: androidx.compose.ui.geometry.Rect?, startMs: Long) {
         openPlayer(
@@ -319,6 +377,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     private var scrollAcc = 0f
 
     override fun onVisited(tab: Tab, url: String, title: String) {
+        if (tab == current && url.startsWith("http")) suggestApp(tab, url)
         if (tab.incognito || !url.startsWith("http")) return
         val host = Uri.parse(url).host?.removePrefix("www.") ?: return
         viewModelScope.launch { db.history().insert(HistoryEntry(url = url, host = host, title = title, visitedAt = System.currentTimeMillis())) }

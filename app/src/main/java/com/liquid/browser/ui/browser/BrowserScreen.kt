@@ -685,10 +685,13 @@ fun BrowserScreen(vm: BrowserViewModel) {
                 )
             }
 
+            // 跳轉 App 提示列（在網址列上方）；提示訊息同時出現時往上讓開
+            AppPromptBar(vm, haze, menuTone, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 72.dp))
+
             // 玻璃提示訊息
             AnimatedVisibility(
                 vm.toast != null,
-                Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 72.dp),
+                Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = if (vm.appPrompt?.tab == vm.current) 132.dp else 72.dp),
                 enter = fadeIn() + slideInVertically { it / 2 },
                 exit = fadeOut(),
             ) {
