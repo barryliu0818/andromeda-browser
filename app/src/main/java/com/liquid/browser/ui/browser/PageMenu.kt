@@ -78,6 +78,8 @@ class PageMenuActions(
     val onDownloads: () -> Unit,
     val onSiteSettings: () -> Unit,
     val onSettings: () -> Unit,
+    /** 回報問題：截圖＋當下狀態存進問題紀錄（BugLog） */
+    val onReport: () -> Unit,
 )
 
 /**
@@ -103,6 +105,7 @@ fun pageMenu(anchor: Rect, tab: Tab, vm: BrowserViewModel, tone: Tone, context: 
         // 直接翻成設定裡選好的語言（設定 → 網頁翻譯 → 翻譯成）
         MenuItem(if (tab.translated) t("顯示原文") else t("翻譯網頁"), "translate") { vm.toggleTranslate(tab) },
         MenuItem(t("設定"), "settings") { actions.onSettings() },
+        MenuItem(t("回報問題"), "bug_report") { actions.onReport() },
     ),
 )
 

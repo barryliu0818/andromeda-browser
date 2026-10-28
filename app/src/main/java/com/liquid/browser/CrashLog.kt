@@ -22,6 +22,7 @@ object CrashLog {
         val app = context.applicationContext
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, e ->
+            BugLog.eventNow("crash", "${thread.name}: ${e.stackTraceToString().lineSequence().take(8).joinToString(" | ")}")
             runCatching {
                 file(app).writeText(
                     buildString {
@@ -73,6 +74,7 @@ object CrashLog {
             android.app.ApplicationExitInfo.REASON_OTHER -> if (foreground) "OTHER" else null
             else -> null
         } ?: return null
+        BugLog.event("exit", "$reason status=${info.status} importance=${info.importance} ${info.description.orEmpty()}")
         return buildString {
             appendLine("Andromeda ${runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull()}")
             appendLine("${Build.MANUFACTURER} ${Build.MODEL}・Android ${Build.VERSION.RELEASE}（API ${Build.VERSION.SDK_INT}）")

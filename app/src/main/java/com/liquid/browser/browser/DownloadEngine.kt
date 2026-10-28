@@ -190,6 +190,7 @@ object DownloadEngine {
             } catch (e: Exception) {
                 t.status = DlStatus.Failed
                 t.error = e.message ?: e.javaClass.simpleName
+                com.liquid.browser.BugLog.event("download", "${t.name}: ${e.javaClass.simpleName} ${e.message}")
             } finally {
                 sampler.cancel()
                 t.connections = 0

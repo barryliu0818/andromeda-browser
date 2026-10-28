@@ -291,6 +291,7 @@ class Tab(
             // 預設回傳 false 會讓整個 App 被結束（看起來就是閃退）：接手處理、重建這個分頁
             override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
                 android.util.Log.w("LiquidTab", "renderer gone crashed=${detail.didCrash()} priority=${detail.rendererPriorityAtExit()}")
+                com.liquid.browser.BugLog.event("renderer", "crashed=${detail.didCrash()} priority=${detail.rendererPriorityAtExit()} $url")
                 listener.onRendererGone(this@Tab)
                 return true
             }
@@ -312,7 +313,10 @@ class Tab(
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-                if (request.isForMainFrame) loadFailed = true
+                if (request.isForMainFrame) {
+                    loadFailed = true
+                    com.liquid.browser.BugLog.event("load", "${error.errorCode} ${error.description} ${request.url}")
+                }
                 if (request.isForMainFrame && error.description?.contains("LOCAL_NETWORK_PERMISSION") == true) listener.onLocalNetworkNeeded(this@Tab)
             }
 

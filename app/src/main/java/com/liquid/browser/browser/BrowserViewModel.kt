@@ -632,6 +632,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
                         runCatching { Translator.translate(todo, engine, s.translateKeys[engine.keyOwner].orEmpty(), s.translateModels[engine].orEmpty(), target) }
                             .recoverCatching { e ->
                                 if (engine == TranslateEngine.Tencent) throw e
+                                com.liquid.browser.BugLog.event("translate", "$engine 失敗，改用免費翻譯：${e.message}")
                                 if (aiFailedFor != tab) { aiFailedFor = tab; showToast(t("%1\$s，改用免費翻譯", e.message)) }
                                 Translator.translate(todo, TranslateEngine.Tencent, "", "", target)
                             }.getOrThrow()

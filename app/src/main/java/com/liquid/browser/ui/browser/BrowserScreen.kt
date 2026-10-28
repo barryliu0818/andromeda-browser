@@ -422,6 +422,21 @@ fun BrowserScreen(vm: BrowserViewModel) {
         onDownloads = { sheet.show { DownloadsContent(menuTone) } },
         onSiteSettings = { sheet.show { SiteSettings(tab, vm, menuTone) } },
         onSettings = { sheet.show { SettingsContent(vm, menuTone) } },
+        onReport = {
+            // 等選單退場動畫結束再截圖，截到的是問題畫面本身
+            scope.launch {
+                delay(450)
+                val state = buildString {
+                    appendLine("網址：${tab.url}")
+                    appendLine("標題：${tab.title}")
+                    appendLine("分頁：${vm.visibleTabs().size} 個（${if (tab.incognito) "無痕" else "一般"}）・載入 ${tab.progress}%")
+                    appendLine("畫面：${if (tab.isBlank) "首頁" else "網頁"}・網址列${if (vm.collapsed) "收合" else "展開"}・${if (landscape) "橫向" else "直向"}・${if (dark) "深色" else "淺色"}")
+                    appendLine("系統模糊：${if (PlatformBackdrop) "原生 backdrop" else if (crossBlur) "跨視窗模糊" else "關閉"}・桌面版 ${tab.desktop}・文字 ${tab.textZoom}%・翻譯 ${tab.translated}")
+                    appendLine("已阻擋：${tab.blockedCount}・偵測到影片：${tab.media.size}")
+                }
+                activity?.let { a -> com.liquid.browser.BugLog.report(a, state) { n -> vm.showToast(t("已記錄問題 #%1\$s", n)) } }
+            }
+        },
     )
 
     // 沒有原生 backdrop 時，網頁上與輸入中的玻璃改用輕量磨砂底（網頁上的控制列另有系統模糊視窗）

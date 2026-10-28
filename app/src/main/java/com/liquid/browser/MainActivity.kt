@@ -66,6 +66,7 @@ class MainActivity : ComponentActivity() {
 
     @OptIn(ExperimentalHazeApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
+        BugLog.init(this)
         CrashLog.install(this)
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
@@ -82,7 +83,12 @@ class MainActivity : ComponentActivity() {
             if (!restored || intent?.dataString != null) vm.newTab(intent?.dataString)
         }
         jankStats = JankStats.createAndTrack(window) { frame ->
-            if (frame.isJank) Log.w("LiquidJank", "${frame.frameDurationUiNanos / 1_000_000.0}ms ${frame.states}")
+            if (frame.isJank) {
+                val ms = frame.frameDurationUiNanos / 1_000_000.0
+                Log.w("LiquidJank", "${ms}ms ${frame.states}")
+                // 超過 3 幀（120Hz 約 25ms）才記進問題紀錄：一兩幀的小抖動太多，會把真正的卡頓淹沒
+                if (ms > 25) BugLog.event("jank", "%.1fms %s %s".format(ms, frame.states.joinToString { "${it.key}=${it.value}" }, vm.current?.domain.orEmpty()))
+            }
         }
         ContextCompat.registerReceiver(this, pipReceiver, IntentFilter(ACTION_PIP_TOGGLE), ContextCompat.RECEIVER_NOT_EXPORTED)
         com.liquid.browser.core.Palette.apply(this)
