@@ -61,8 +61,31 @@ object AppLinks {
         val view = Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE)
         val ri = context.packageManager.queryIntentActivities(view, PackageManager.MATCH_DEFAULT_ONLY).firstOrNull {
             it.activityInfo.packageName != context.packageName && (it.match and IntentFilter.MATCH_CATEGORY_MASK) >= IntentFilter.MATCH_CATEGORY_HOST
-        } ?: return null
-        return view.setPackage(ri.activityInfo.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        if (ri != null) return view.setPackage(ri.activityInfo.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        // 沒向系統註冊自家網址的 App：查對照表轉成 App 專用連結（App 沒裝時 target() 找不到，不會提示）
+        return mapped(uri, host)?.let(::toIntent)
+    }
+
+    /**
+     * 網址 → App 專用連結。淘寶、京東這類國內 App 多半只認自訂協定，不接自家網址；
+     * 小紅書、B 站、微博只有單篇內容頁能對應（首頁、搜尋頁沒有對應的 App 頁面，回傳 null）。
+     */
+    private fun mapped(uri: Uri, host: String): String? {
+        fun on(vararg sites: String) = sites.any { host == it || host.endsWith(".$it") }
+        val path = uri.path.orEmpty()
+        fun id(re: String) = Regex(re).find(path)?.groupValues?.get(1)
+        return when {
+            // 淘寶 App 也開天貓商品；連結照原樣接在 taobao:// 後面
+            on("taobao.com", "tmall.com", "tb.cn") -> "taobao://" + uri.toString().substringAfter("://")
+            // 京東：在 App 內開這個網頁（des=m），商品頁會自動換成 App 的商品頁
+            on("jd.com") -> "openapp.jdmobile://virtual?params=" +
+                Uri.encode(org.json.JSONObject().put("category", "jump").put("des", "m").put("url", uri.toString()).toString())
+            on("xiaohongshu.com") -> id("/(?:explore|discovery/item)/(\\w+)")?.let { "xhsdiscover://item/$it" }
+            on("bilibili.com") -> id("/video/(BV\\w+|av\\d+)")?.let { "bilibili://video/$it" }
+            on("weibo.com", "weibo.cn") -> id("/(?:detail|status)/(\\w+)")?.let { "sinaweibo://detail?mblogid=$it" }
+            else -> null
+        }
     }
 }
 

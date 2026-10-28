@@ -128,7 +128,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     var appPrompt by mutableStateOf<AppPrompt?>(null)
         private set
 
-    /** 已檢查過「有沒有專屬 App」的網站：同一個網站只提示一次 */
+    /** 已提示過「在 App 中開啟」的網站：同一個網站只提示一次（沒找到 App 不記，內容頁才對得到 App 的網站之後還會再查） */
     private val suggestedSites = HashSet<String>()
 
     // 點擊開的直接開 App；網頁自己觸發的先詢問；沒裝 App 就改開備用網址（intent:// 的 browser_fallback_url）
@@ -157,12 +157,14 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     /** 網頁載入完成：這個網站有專屬 App（淘寶、知乎…）就提示可以改用 App 開啟 */
     private fun suggestApp(tab: Tab, url: String) {
         val site = Uri.parse(url).host?.let(::baseDomain) ?: return
-        if (!suggestedSites.add(site)) return
+        if (site in suggestedSites) return
         viewModelScope.launch {
             val found = withContext(Dispatchers.Default) {
                 AppLinks.nativeAppFor(webContext, url)?.let { intent -> AppLinks.target(webContext, intent)?.let { intent to it } }
             } ?: return@launch
-            if (tab == current && tab.url == url && appPrompt == null) showAppPrompt(AppPrompt(tab, found.first, found.second.label, found.second.icon, ask = false))
+            if (tab == current && tab.url == url && appPrompt == null && suggestedSites.add(site)) {
+                showAppPrompt(AppPrompt(tab, found.first, found.second.label, found.second.icon, ask = false))
+            }
         }
     }
 
