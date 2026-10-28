@@ -538,7 +538,13 @@ private fun KeyField(label: String, value: String, hint: String, tone: Tone, acc
                 Modifier.clip(CircleShape).clickable(onClickLabel = t("從剪貼簿貼上金鑰")) {
                     val clip = context.getSystemService(android.content.ClipboardManager::class.java)
                     val pasted = clip?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()?.trim().orEmpty()
-                    if (pasted.isNotEmpty()) { text = pasted; onSave(pasted) }
+                    if (pasted.isNotEmpty()) {
+                        text = pasted
+                        onSave(pasted)
+                        // 金鑰貼上後清掉剪貼簿：不留在剪貼簿（其他 App、輸入法的剪貼簿紀錄、小米跨裝置同步都讀得到）
+                        if (android.os.Build.VERSION.SDK_INT >= 28) clip?.clearPrimaryClip()
+                        else clip?.setPrimaryClip(android.content.ClipData.newPlainText("", ""))
+                    }
                 }.padding(horizontal = 14.dp, vertical = 10.dp),
                 color = accent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
             )
