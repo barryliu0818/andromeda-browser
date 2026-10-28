@@ -663,7 +663,8 @@ fun BrowserScreen(vm: BrowserViewModel) {
                 }
                 // 沒有原生 backdrop（Android 17.0）時，網頁上的控制列放進系統模糊視窗，由系統合成器做真正的毛玻璃；
                 // 輸入網址、尋找、橫向時維持在主畫面（不透明磨砂底）
-                val sysBlur = (DEBUG_FORCE_SYSBLUR || (!PlatformBackdrop && crossBlur)) && !tab.isBlank && !focused && !finding && !landscape
+                // 首頁也放進系統模糊視窗：和首頁中間的搜尋框同一種玻璃（否則底部網址列是 Material 實心色、中間是白色毛玻璃，顏色不一樣）
+                val sysBlur = (DEBUG_FORCE_SYSBLUR || (!PlatformBackdrop && crossBlur)) && !focused && !finding && !landscape
                 // 面板（設定、網站設定…）打開時不畫控制列：面板蓋住整個底部，而系統模糊視窗／原生取樣的玻璃會疊在面板之上
                 // 系統模糊視窗一直保留：輸入中、面板或選單開著等情況改畫在主畫面（inline），切回來不必重建、不會換色；
                 // 選單開著時控制列在遮罩下面，點哪裡都只會關選單，不會同時打開別的東西；
