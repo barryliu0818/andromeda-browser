@@ -20,11 +20,13 @@ android {
     compileSdk { version = release(37) }
 
     defaultConfig {
-        applicationId = "com.liquid.browser"
+        // 原本的簽章金鑰遺失，無法覆蓋手機上的舊版（com.liquid.browser）：新版用另一個套件名稱，兩版並存
+        applicationId = "com.liquid.browser.next"
+        manifestPlaceholders["appLabel"] = "Andromeda 新版"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 4
+        versionName = "0.4"
     }
 
     signingConfigs {

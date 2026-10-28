@@ -24,7 +24,7 @@
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
-        android:label="Andromeda"
+        android:label="${appLabel}"
         android:supportsRtl="true"
         android:enableOnBackInvokedCallback="true"
         android:theme="@style/AppTheme">
