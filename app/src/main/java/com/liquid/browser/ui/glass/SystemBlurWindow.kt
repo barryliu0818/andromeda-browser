@@ -217,10 +217,16 @@ internal class BlurDialog(context: Context, parent: CompositionContext) : Dialog
         rect = r; origin = o
         if (full != s) full = s
         val w = window ?: return
-        // 這塊玻璃目前不存在（例如收合時的分頁鈕），或被總覽、播放器蓋住：隱藏視窗，連模糊一起消失
-        val empty = r.width < 1f || r.height < 1f || hidden
-        w.decorView.visibility = if (empty) android.view.View.GONE else android.view.View.VISIBLE
-        if (empty) return
+        // 被總覽、播放器蓋住：隱藏視窗，連模糊一起消失
+        w.decorView.visibility = if (hidden) android.view.View.GONE else android.view.View.VISIBLE
+        if (hidden) return
+        // 這塊玻璃目前不存在（例如收合時的分頁鈕）或還不知道範圍：縮成畫面外 1×1，但內容照常排版——
+        // 玻璃範圍是視窗裡的內容排版時回報的，視窗 GONE 就永遠收不到範圍、一直不出現（開網頁後網址列消失）
+        if (r.width < 1f || r.height < 1f) {
+            val lp = w.attributes
+            if (lp.x != -1 || lp.y != -1 || lp.width != 1 || lp.height != 1) { lp.x = -1; lp.y = -1; lp.width = 1; lp.height = 1; w.attributes = lp }
+            return
+        }
         bg.cornerRadius = cornerPx ?: (r.height / 2f)
         if (!blurSet && w.decorView.isAttachedToWindow) {
             w.setBackgroundBlurRadius(blurPx)

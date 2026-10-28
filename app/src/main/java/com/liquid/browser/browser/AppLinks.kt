@@ -2,6 +2,7 @@ package com.liquid.browser.browser
 
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.compose.runtime.Immutable
@@ -49,16 +50,18 @@ object AppLinks {
     }
 
     /**
-     * 一般網址的專屬 App（例如淘寶、知乎、YouTube）：能開這個網址、但開不了任意網站的 App。
-     * 瀏覽器會接任何網址，所以拿一個不存在的網址比對，兩邊都有的就是瀏覽器，排除。
+     * 一般網址的專屬 App（例如淘寶、知乎、YouTube）：篩選條件指名這個網域的 App。
+     * 瀏覽器只比對到協定（任何網址都接），不算；本機位址（localhost、IP）不提示——
+     * 不少 App 用 http://localhost 接 OAuth 登入回呼（例如釘釘郵箱），不是真的能開這個網站。
      */
     fun nativeAppFor(context: Context, url: String): Intent? {
-        val pm = context.packageManager
-        val view = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE)
-        val browsers = pm.queryIntentActivities(Intent(Intent.ACTION_VIEW, Uri.parse("https://example.invalid/")).addCategory(Intent.CATEGORY_BROWSABLE), PackageManager.MATCH_ALL)
-            .mapTo(HashSet()) { it.activityInfo.packageName }
-        val ri = pm.queryIntentActivities(view, PackageManager.MATCH_DEFAULT_ONLY)
-            .firstOrNull { it.activityInfo.packageName != context.packageName && it.activityInfo.packageName !in browsers } ?: return null
+        val uri = Uri.parse(url)
+        val host = uri.host?.lowercase() ?: return null
+        if (host == "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || ':' in host || host.all { it.isDigit() || it == '.' }) return null
+        val view = Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE)
+        val ri = context.packageManager.queryIntentActivities(view, PackageManager.MATCH_DEFAULT_ONLY).firstOrNull {
+            it.activityInfo.packageName != context.packageName && (it.match and IntentFilter.MATCH_CATEGORY_MASK) >= IntentFilter.MATCH_CATEGORY_HOST
+        } ?: return null
         return view.setPackage(ri.activityInfo.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
 }
