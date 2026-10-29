@@ -233,6 +233,10 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         viewModelScope.launch {
             settings.map { it.identifyAsIPhone }.distinctUntilChanged().collect { on -> tabs.forEach { it.setIdentifyAsIPhone(on) } }
         }
+        // 「封鎖第三方 Cookie」改變時套用到所有已開啟的分頁
+        viewModelScope.launch {
+            settings.map { it.blockThirdPartyCookies }.distinctUntilChanged().collect { block -> tabs.forEach { it.setThirdPartyCookies(!block) } }
+        }
     }
 
     private var nextId = 0L
@@ -537,6 +541,10 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     }
 
     override fun adBlockFor(pageHost: String): Boolean = settings.value.let { it.adBlock && baseDomain(pageHost) !in it.adAllow }
+
+    override fun cleanLinks(tab: Tab): Boolean = tab.incognito || settings.value.cleanLinksEverywhere
+
+    override fun allowThirdPartyCookies(): Boolean = !settings.value.blockThirdPartyCookies
 
     override fun blockRedirects() = settings.value.blockRedirects
 

@@ -52,6 +52,10 @@ data class Settings(
     val videoDownloadButton: Boolean = true,
     /** 網址列放在畫面頂端（直向時；橫向一律在頂端） */
     val addressBarTop: Boolean = false,
+    /** 封鎖第三方 Cookie（嵌在別的網站裡、用來跨網站追蹤的 Cookie） */
+    val blockThirdPartyCookies: Boolean = true,
+    /** 所有瀏覽都拿掉網址上的追蹤參數（關閉時只有無痕分頁拿掉，同 Safari） */
+    val cleanLinksEverywhere: Boolean = false,
     /** 介面語言 */
     val appLang: com.liquid.browser.core.AppLang = com.liquid.browser.core.AppLang.System,
 )
@@ -82,6 +86,8 @@ class SettingsStore(private val context: Context) {
         val videoDl = booleanPreferencesKey("video_download_button")
         val appLang = stringPreferencesKey("app_lang")
         val barTop = booleanPreferencesKey("address_bar_top")
+        val tpc = booleanPreferencesKey("block_third_party_cookies")
+        val cleanAll = booleanPreferencesKey("clean_links_everywhere")
         fun trKey(e: TranslateEngine) = stringPreferencesKey("translate_key_${e.name}")
         fun trModel(e: TranslateEngine) = stringPreferencesKey("translate_model_${e.name}")
     }
@@ -108,6 +114,8 @@ class SettingsStore(private val context: Context) {
         blockRedirects = this[K.redirects] ?: true,
         videoDownloadButton = this[K.videoDl] ?: true,
         addressBarTop = this[K.barTop] ?: false,
+        blockThirdPartyCookies = this[K.tpc] ?: true,
+        cleanLinksEverywhere = this[K.cleanAll] ?: false,
         appLang = this[K.appLang]?.let { runCatching { com.liquid.browser.core.AppLang.valueOf(it) }.getOrNull() } ?: com.liquid.browser.core.AppLang.System,
     )
 
@@ -130,6 +138,8 @@ class SettingsStore(private val context: Context) {
             p[K.redirects] = n.blockRedirects
             p[K.videoDl] = n.videoDownloadButton
             p[K.barTop] = n.addressBarTop
+            p[K.tpc] = n.blockThirdPartyCookies
+            p[K.cleanAll] = n.cleanLinksEverywhere
             p[K.appLang] = n.appLang.name
             TranslateEngine.entries.forEach { e ->
                 n.translateKeys[e]?.let { p[K.trKey(e)] = it } ?: p.remove(K.trKey(e))

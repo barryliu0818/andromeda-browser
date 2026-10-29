@@ -74,6 +74,12 @@ class Tab(
         /** 這個網站是否要阻擋廣告（總開關開著且不在例外清單） */
         fun adBlockFor(pageHost: String): Boolean
 
+        /** 這個分頁要不要拿掉網址上的追蹤參數（無痕分頁一律要；設定可改成所有瀏覽） */
+        fun cleanLinks(tab: Tab): Boolean
+
+        /** 是否允許第三方 Cookie（設定；預設不允許） */
+        fun allowThirdPartyCookies(): Boolean
+
         /** 是否阻止未經點擊的跨站跳轉 */
         fun blockRedirects(): Boolean
 
@@ -240,7 +246,15 @@ class Tab(
     val domain get() = if (url == "about:blank") "" else Uri.parse(url).host?.removePrefix("www.") ?: url
     val insecure get() = url.startsWith("http://")
 
+    /** 阻擋已知追蹤器：無痕分頁一律阻擋（Safari 私密瀏覽），其他依設定與網站例外 */
+    private fun blocksTrackers(pageHost: String) = incognito || listener.adBlockFor(pageHost)
+
+    /** 第三方 Cookie（嵌在別的網站裡的追蹤 Cookie）：預設封鎖；無痕分頁一律封鎖 */
+    fun setThirdPartyCookies(allow: Boolean) =
+        android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(webView, allow && !incognito)
+
     init {
+        setThirdPartyCookies(listener.allowThirdPartyCookies())
         // Compose AndroidView 預設給 WRAP_CONTENT：WebView 會把版面高度當成 0（高度隨內容延展），
         // 導致網頁的 100vh／dvh 變成 0（例如 Google 首頁整個擠在上方）。明確指定 MATCH_PARENT。
         webView.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
@@ -305,15 +319,19 @@ class Tab(
                     }
                 }
                 // 點到廣告：要跳去的網站在廣告清單裡就攔下，原頁面不動（覆蓋在播放鍵上的透明廣告連結）
-                if (target.isNotEmpty() && !isBlank && listener.adBlockFor(pageHost) && AdBlocker.blocks(target) && baseDomain(target) != baseDomain(pageHost)) {
+                if (target.isNotEmpty() && !isBlank && blocksTrackers(pageHost) && AdBlocker.blocks(target) && baseDomain(target) != baseDomain(pageHost)) {
                     listener.onAdClickBlocked(this@Tab, request.url.toString())
                     return true
                 }
                 if (isMediaUrl(request.url.toString()) && listener.onMediaUrl(this@Tab, request.url.toString())) return true
                 rememberShownPage()
+                val raw = request.url.toString()
+                // 連結追蹤保護：拿掉網址上的追蹤參數再開（伺服器轉址不處理：網站轉回帶參數的網址時才不會來回打轉）
+                val clean = if (request.method == "GET" && !request.isRedirect && listener.cleanLinks(this@Tab)) LinkCleaner.clean(raw) else raw
                 // 要去的網站身分不同（例如從一般網站點進 YouTube）：切換後自己重新發出這個請求
-                if (request.method == "GET" && switchIdentityFor(request.url.toString())) {
-                    view.loadUrl(request.url.toString())
+                val switched = request.method == "GET" && switchIdentityFor(clean)
+                if (switched || clean !== raw) {
+                    view.loadUrl(clean)
                     return true
                 }
                 return false
@@ -326,7 +344,7 @@ class Tab(
                 if (!request.isForMainFrame) {
                     val host = request.url.host.orEmpty()
                     val page = pageHost
-                    if (host.isNotEmpty() && listener.adBlockFor(page) && AdBlocker.blocks(host) && baseDomain(host) != baseDomain(page)) {
+                    if (host.isNotEmpty() && blocksTrackers(page) && AdBlocker.blocks(host) && baseDomain(host) != baseDomain(page)) {
                         main.post { blockedCount++ }
                         return AdBlocker.emptyResponse()
                     }
@@ -514,7 +532,7 @@ class Tab(
     private var legacyInject = false
 
     fun load(input: String) {
-        val target = toUrl(input, listener.searchPrefix())
+        val target = toUrl(input, listener.searchPrefix()).let { if (listener.cleanLinks(this)) LinkCleaner.clean(it) else it }
         if (isMediaUrl(target) && listener.onMediaUrl(this, target, typed = true)) return
         rememberShownPage()
         url = target
