@@ -529,13 +529,15 @@ fun BrowserScreen(vm: BrowserViewModel) {
                             val bar = if (collapsedNow) 0 else controlsPx
                             when {
                                 landscape -> tab.setControlsInset(0, bar)
-                                // 直向、網址列在頂端：上方讓出網址列，下方只讓出手勢導覽列
-                                barTop -> tab.setControlsInset(navBottom, bar)
+                                // 直向（網址列在頂端時網頁整個往下移一條網址列的高度，底部被推出畫面的那段一樣要讓出）
                                 else -> tab.setControlsInset(navBottom + bar, 0)
                             }
                         }
                         key(tab.id) {
-                            Box(Modifier.fillMaxWidth().weight(1f)) {
+                            // 直向、網址列在頂端（Chrome 的作法）：網頁往下移一條網址列的高度，網頁頂端不被蓋住；
+                            // 網址列往上滑走時網頁跟著同步往上（在排版階段位移，不重組、不改 WebView 大小）
+                            val pushDown = barTop && !landscape
+                            Box(Modifier.fillMaxWidth().weight(1f).offset { IntOffset(0, if (pushDown) ((1f - vm.collapse) * controlsPx).roundToInt() else 0) }) {
                                 AndroidView(
                                     factory = { tab.webView.also { (it.parent as? ViewGroup)?.removeView(it) } },
                                     modifier = Modifier.fillMaxSize(),
