@@ -676,6 +676,9 @@ fun BrowserScreen(vm: BrowserViewModel) {
                                 onPageMenu = { anchor -> menu.show(pageMenu(toMain(anchor), tab, vm, menuTone, context, pageActions)) },
                                 // 一般網頁直接翻譯／切回原文；YouTube 跳出「翻譯網頁／翻譯字幕」
                                 onTranslate = { anchor -> if (tab.isYouTube) menu.show(translateMenu(toMain(anchor), tab, vm)) else vm.toggleTranslate(tab) },
+                                // 返回鈕：有上一頁就回上一頁；網頁的第一頁回到起始頁（跟系統返回手勢一樣，原網頁留在分頁裡）
+                                onBack = { if (tab.canGoBack) tab.webView.goBack() else if (!tab.isBlank) vm.newTab(incognito = tab.incognito) },
+                                backEnabled = tab.canGoBack || !tab.isBlank,
                                 // 長按返回：列出上一頁歷史（最近的在最上面），點一下直接跳回那一頁
                                 onBackLongPress = { anchor ->
                                     val list = tab.webView.copyBackForwardList()

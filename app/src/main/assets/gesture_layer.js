@@ -57,7 +57,7 @@
     '.lq-rate{position:relative;margin-left:auto}' +
     '.lq-rate .lq-speed svg{width:14px;height:14px;fill:#fff;margin-left:2px;transition:transform .2s}' +
     '.lq-rate.open .lq-speed svg{transform:rotate(180deg)}' +
-    '.lq-menu{position:absolute;right:0;top:44px;min-width:128px;padding:6px;border-radius:18px;background:rgba(28,28,30,.55);' +
+    '.lq-menu{position:absolute;right:0;top:44px;max-height:calc(100vh - 150px);overflow-y:auto;overscroll-behavior:contain;min-width:128px;padding:6px;border-radius:18px;background:rgba(28,28,30,.55);' +
     '-webkit-backdrop-filter:blur(24px) saturate(1.6);backdrop-filter:blur(24px) saturate(1.6);box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 10px 30px rgba(0,0,0,.35);' +
     'opacity:0;transform:scale(.9) translateY(-6px);transform-origin:top right;transition:opacity .16s,transform .2s cubic-bezier(.05,.7,.1,1);pointer-events:none}' +
     '.lq-rate.open .lq-menu{opacity:1;transform:none;pointer-events:auto}' +
@@ -156,7 +156,7 @@
     var ICON_PLAY = '<svg viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z"/></svg>';
     var ICON_PAUSE = '<svg viewBox="0 0 24 24"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg>';
     var ICON_CLOSE = '<svg viewBox="0 0 24 24"><path d="M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12 19 17.6 17.6 19 12 13.4 6.4 19 5 17.6 10.6 12 5 6.4z"/></svg>';
-    var SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4, 5];
+    var SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4, 5];
     var ICON_DL = '<svg viewBox="0 0 24 24"><path d="M11 4h2v8.2l3.1-3.1 1.4 1.4L12 16l-5.5-5.5 1.4-1.4 3.1 3.1zM5 18h14v2H5z"/></svg>';
     // 依網頁語言顯示確認文字（App 介面語言傳不進網頁，用瀏覽器語言判斷）
     var lang = (navigator.language || '').toLowerCase();
@@ -282,8 +282,10 @@
       var h = host();
       if (layer.parentNode !== h) h.appendChild(layer);
       var r = video.getBoundingClientRect();
-      // 全螢幕時貼齊實際畫面（直向時 <video> 撐滿整個螢幕、畫面在中間；照元素放的話 2x 提示會頂到鏡頭）
-      if (h !== document.body) r = picture(video, r);
+      // 2x 提示貼著實際畫面的上緣（直向全螢幕時 <video> 撐滿整個螢幕、畫面在中間，照元素放會頂到鏡頭）；
+      // 控制層本身仍撐滿整個影片元素：直向時畫面只是一條橫帶，倍速選單、控制列放不下
+      var pic = picture(video, r);
+      pill.style.top = Math.round(pic.top - r.top + Math.max(16, pic.height * 0.11)) + 'px';
       var base = h === document.body ? { left: -window.scrollX, top: -window.scrollY } : h.getBoundingClientRect();
       layer.style.left = (r.left - base.left) + 'px';
       layer.style.top = (r.top - base.top) + 'px';

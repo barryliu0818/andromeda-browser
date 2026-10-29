@@ -114,7 +114,8 @@ private class Placement {
     var push: () -> Unit = {}
 }
 
-private const val MaxRegions = 2
+// 返回鈕、網址列、分頁鈕（Safari 精簡版面）各一塊
+private const val MaxRegions = 3
 
 /**
  * 預備好的系統模糊視窗：打開選單、面板時不必當場建立視窗（建 Dialog、加進 WindowManager、第一次排版），直接拿來用。

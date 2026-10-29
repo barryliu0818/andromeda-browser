@@ -131,6 +131,9 @@ fun Controls(
     onPageMenu: (Rect) -> Unit,
     /** 網址列的翻譯鈕；anchor 給 YouTube 的兩項小選單 */
     onTranslate: (Rect) -> Unit,
+    /** 左側返回鈕（Safari 精簡版面）：點一下上一頁、長按列出上一頁歷史 */
+    onBack: () -> Unit,
+    backEnabled: Boolean,
     onBackLongPress: (Rect) -> Unit,
     onTabsLongPress: (Rect) -> Unit,
     pillGestures: PillGestures,
@@ -179,14 +182,34 @@ fun Controls(
                 )
             }
 
-            // 前往（聚焦時）：送出輸入內容；沒輸入就收起。取消改由點空白處（遮罩）或返回鍵
+            // 返回（Safari 精簡版面左側的圓鈕）：沒有上一頁時變淡、不能按；長按列出上一頁歷史
+            var backBounds by remember { mutableStateOf(Rect.Zero) }
+            val backI = remember { MutableInteractionSource() }
+            if (showTabs) Box(
+                Modifier.layoutId("back").liquidGlass(haze, circleStyle, CircleShape, backI)
+                    .onGloballyPositioned { backBounds = it.boundsInRoot() }
+                    .semantics { contentDescription = t("上一頁") }
+                    .combinedClickable(
+                        interactionSource = backI, indication = null, enabled = backEnabled,
+                        onLongClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onBackLongPress(backBounds)
+                        },
+                    ) { onBack() },
+                Alignment.Center,
+            ) {
+                Sym("arrow_back_ios_new", tone.content, 20.dp, Modifier.graphicsLayer { alpha = (if (backEnabled) 1f else 0.3f) * (1 - f.value) })
+            }
+
+            // 輸入時右側的 ✕（Safari）：收起輸入、回到網頁；送出用鍵盤的「前往」
             // 與圓鈕同一套毛玻璃；左側 8dp 為與網址列的間隙
             if (showCancel) Box(
                 Modifier.layoutId("cancel").padding(start = 8.dp).liquidGlass(haze, circleStyle, CircleShape, cancelI)
-                    .clickable(cancelI, null) { if (query.text.isBlank()) onCancel() else onSubmit(query.text) },
+                    .semantics { contentDescription = t("取消") }
+                    .clickable(cancelI, null) { onCancel() },
                 Alignment.Center,
             ) {
-                Text(t("前往"), Modifier.graphicsLayer { alpha = f.value }, color = tone.content, fontSize = 16.sp, maxLines = 1)
+                Sym("close", tone.content, 22.dp, Modifier.graphicsLayer { alpha = f.value })
             }
 
             // 網址膠囊
@@ -218,13 +241,15 @@ fun Controls(
         val h = lerp(d0, Dimens.ControlCollapsed.toPx(), pv)
         val gap0 = Dimens.ControlGap.toPx()
         val gap = lerp(gap0, -h, pv)
+        // Safari 精簡版面：(返回) [網址列] (分頁)；輸入時兩側圓鈕收進去、右側換成 ✕
         val tw = h * (1 - fv)
         val tgap = gap * (1 - fv)
-        val cw = 84.dp.toPx() * fv
-        val pillFull = full - (d0 + gap0) * (1 - fv) - cw
+        val cw = (d0 + gap0) * fv
+        val pillFull = full - (d0 + gap0) * 2 * (1 - fv) - cw
         val pillW = lerp(pillFull, min(Dimens.CollapsedPillMaxWidth.toPx(), full * 0.6f), pv)
-        val total = pillW + tgap + tw + cw
-        val pillX = (full - total) / 2
+        val total = tw + tgap + pillW + tgap + tw + cw
+        val backX = (full - total) / 2
+        val pillX = backX + tw + tgap
         // 直向底緣對齊：高度縮小時中心自然下移，與手勢導覽列的間隙不變；橫向則貼齊頂端
         val y = if (alignTop) 0 else (d0 - h).toInt()
         fun fixed(w: Float) = Constraints.fixed(w.toInt().coerceAtLeast(0), h.toInt())
@@ -232,15 +257,18 @@ fun Controls(
         val pillP = part("pill", pillW)!!
         val tabsP = part("tabs", tw)
         val cancelP = part("cancel", cw)
+        val backP = part("back", tw)
         layout(c.maxWidth, d0.toInt()) {
-            // 網址列、分頁鈕各一塊（系統模糊時各自一個視窗，兩者之間的空隙不模糊）
+            // 返回鈕、網址列、分頁鈕各一塊（系統模糊時各自一個視窗，之間的空隙不模糊）
             onGlassBounds?.invoke(
                 listOf(
+                    Rect(backX, y.toFloat(), backX + tw, y + h),
                     Rect(pillX, y.toFloat(), pillX + pillW, y + h),
                     // 收合時分頁鈕會滑進網址列：只算網址列右邊露出來的那段，兩塊不重疊（重疊處會被模糊、上色兩次而有色差）
                     Rect(maxOf(pillX + pillW + tgap, pillX + pillW), y.toFloat(), pillX + pillW + tgap + tw, y + h),
                 ),
             )
+            backP?.place(backX.toInt(), y)
             pillP.place(pillX.toInt(), y)
             tabsP?.place((pillX + pillW + tgap).toInt(), y)
             cancelP?.place((pillX + pillW + tgap + tw).toInt(), y)
@@ -368,7 +396,8 @@ private fun UrlLabel(
     // 收合時兩側按鈕不可見，點到它們等同點小膠囊（展開）；不在組合階段讀進度，避免捲動時重組
     Row(Modifier.fillMaxSize().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         SymButton(
-            "more_horiz", tone.content, Modifier.onGloballyPositioned { menuBounds = it.boundsInRoot() }, alpha = iconAlpha,
+            // 頁面選單：Safari 的 ≡（網頁的動作）
+            "menu", tone.content, Modifier.onGloballyPositioned { menuBounds = it.boundsInRoot() }, alpha = iconAlpha, label = t("頁面選單"),
         ) { if (p() > 0.5f) onCollapsedTap() else onPageMenu(menuBounds) }
         Row(
             Modifier.weight(1f).graphicsLayer {

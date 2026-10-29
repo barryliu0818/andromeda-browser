@@ -104,7 +104,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** 右上角速度選單：最高 5 倍 */
-private val Speeds = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f, 4f, 5f)
+private val Speeds = listOf(0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f, 4f, 5f)
 private val Tabular = TextStyle(fontFeatureSettings = "tnum")
 
 /**

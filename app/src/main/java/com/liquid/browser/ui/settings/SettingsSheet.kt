@@ -1,5 +1,13 @@
 package com.liquid.browser.ui.settings
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.border
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.drawscope.Stroke
 import com.liquid.browser.core.t
 
 import android.content.Context
@@ -231,11 +239,30 @@ fun SettingsContent(vm: BrowserViewModel, tone: Tone) {
         // 外觀
         item { GroupHeader(t("外觀"), tone) }
         item {
-            // 直向時網址列在底部（單手好按）或頂部（傳統瀏覽器的位置）；橫向一律在頂部
-            GroupMenuRow(
-                0, 3, tone, t("網址列位置"), listOf(t("底部"), t("頂部")), if (s.addressBarTop) 1 else 0,
-                leading = { IconTile("swap_vert", accent) },
-            ) { i -> vm.updateSettings { it.copy(addressBarTop = i == 1) } }
+            // 直向時網址列在底部（單手好按）或頂部（傳統瀏覽器的位置）；橫向一律在頂部。
+            // 跟 Safari 一樣用手機示意圖選：看圖就知道網址列會在哪
+            Row(
+                Modifier.fillMaxWidth().groupItem(0, 3, tone).padding(vertical = 16.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+            ) {
+                listOf(false to t("底部"), true to t("頂部")).forEach { (top, label) ->
+                    val on = s.addressBarTop == top
+                    Column(
+                        Modifier.clip(RoundedCornerShape(16.dp)).clickable { vm.updateSettings { it.copy(addressBarTop = top) } }
+                            .padding(horizontal = 20.dp, vertical = 6.dp)
+                            .semantics(mergeDescendants = true) { selected = on },
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        LayoutPhone(top, if (on) accent else tone.content.copy(alpha = 0.35f))
+                        Text(label, Modifier.padding(top = 8.dp), color = tone.content, fontSize = 15.sp)
+                        Box(
+                            Modifier.padding(top = 6.dp).size(22.dp).clip(CircleShape)
+                                .then(if (on) Modifier.background(accent) else Modifier.border(1.5.dp, tone.content.copy(alpha = 0.3f), CircleShape)),
+                            Alignment.Center,
+                        ) { if (on) Sym("check", Color.White, 16.dp) }
+                    }
+                }
+            }
         }
         item {
             GroupToggle(1, 3, tone, t("降低透明度"), s.reduceTransparency, leading = { IconTile("contrast", Color(0xFF8E8E93)) }) { v -> vm.updateSettings { it.copy(reduceTransparency = v) } }
@@ -569,6 +596,19 @@ private fun TextButton(text: String, color: Color, onClick: () -> Unit) =
     Text(text, Modifier.clip(CircleShape).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp), color = color, fontSize = 15.sp)
 
 /** 把選取的圖片複製到 App 私有資料夾（相簿授權只是暫時的），回傳 file:// 路徑。 */
+/** 網址列位置的示意圖：手機外框，網址列畫成底部或頂部的一條（選中時用強調色） */
+@Composable
+private fun LayoutPhone(top: Boolean, color: Color) {
+    androidx.compose.foundation.Canvas(Modifier.size(44.dp, 84.dp)) {
+        val st = 2.dp.toPx()
+        drawRoundRect(color, topLeft = Offset(st / 2, st / 2), size = Size(size.width - st, size.height - st), cornerRadius = CornerRadius(10.dp.toPx()), style = Stroke(st))
+        val barW = size.width * 0.62f
+        val barH = 5.dp.toPx()
+        val y = if (top) 9.dp.toPx() else size.height - 9.dp.toPx() - barH
+        drawRoundRect(color, topLeft = Offset((size.width - barW) / 2, y), size = Size(barW, barH), cornerRadius = CornerRadius(barH / 2))
+    }
+}
+
 private suspend fun copyBackground(context: Context, uri: Uri): String = withContext(Dispatchers.IO) {
     val file = File(context.filesDir, "start_background_${System.currentTimeMillis()}.img")
     context.filesDir.listFiles { f -> f.name.startsWith("start_background_") }?.forEach { it.delete() }

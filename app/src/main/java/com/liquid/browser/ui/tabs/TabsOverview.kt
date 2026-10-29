@@ -1,5 +1,11 @@
 package com.liquid.browser.ui.tabs
 
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import com.liquid.browser.core.t
@@ -175,7 +181,8 @@ fun TabsOverview(vm: BrowserViewModel, transition: OverviewTransition, onOpen: (
                 GridCells.Fixed(2),
                 Modifier.fillMaxSize().nestedScroll(pull).offset { IntOffset(0, reveal.roundToInt()) },
                 state = grid,
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = top + 16.dp, bottom = 120.dp),
+                // 上方讓出搜尋與 … 圓鈕那一列
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = top + Dimens.Control + Dimens.NavGap * 2 + 8.dp, bottom = 120.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp),
             ) {
@@ -236,36 +243,71 @@ fun TabsOverview(vm: BrowserViewModel, transition: OverviewTransition, onOpen: (
             }
         }
 
-        // 底部：＋ / N 個分頁 / 完成
+        // 頂部（Safari）：左上搜尋分頁、右上 …（書籤與歷史紀錄、下載項目、設定：App 層級的功能）
+        Row(
+            Modifier.align(Alignment.TopCenter).statusBarsPadding()
+                .padding(horizontal = Dimens.EdgeMargin, vertical = Dimens.NavGap).fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            LiquidGlass(haze, tone, CircleShape, Modifier.size(Dimens.Control), onClick = {
+                searching = true
+                scope.launch { animate(reveal, searchH, animationSpec = Motion.glass()) { v, _ -> reveal = v } }
+            }) {
+                Sym("search", tone.content, 24.dp, Modifier.clearAndSetSemantics { contentDescription = t("搜尋分頁") })
+            }
+            var libBounds by remember { mutableStateOf(Rect.Zero) }
+            LiquidGlass(haze, tone, CircleShape, Modifier.size(Dimens.Control).onGloballyPositioned { libBounds = it.boundsInRoot() }, onClick = { onLibrary(libBounds) }) {
+                Sym("more_horiz", tone.content, 24.dp, Modifier.clearAndSetSemantics { contentDescription = t("更多") })
+            }
+        }
+
+        // 底部（Safari）：＋ / 無痕｜N 個分頁 分段切換 / 藍色 ✓ 完成
         Row(
             Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
                 .padding(start = Dimens.EdgeMargin, end = Dimens.EdgeMargin, bottom = Dimens.NavGap)
                 .fillMaxWidth().height(Dimens.Control),
-            horizontalArrangement = Arrangement.spacedBy(Dimens.ControlGap),
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             LiquidGlass(haze, tone, CircleShape, Modifier.size(Dimens.Control).onGloballyPositioned { transition.plusBounds = it.boundsInRoot() }, onClick = onNew) {
-                Sym("add", tone.content, 26.dp)
+                Sym("add", tone.content, 26.dp, Modifier.clearAndSetSemantics { contentDescription = t("新增分頁") })
             }
-            // 資料庫：書籤與歷史紀錄、下載項目、設定（App 層級的功能，不放在網頁的 … 裡）
-            var libBounds by remember { mutableStateOf(Rect.Zero) }
-            LiquidGlass(haze, tone, CircleShape, Modifier.size(Dimens.Control).onGloballyPositioned { libBounds = it.boundsInRoot() }, onClick = { onLibrary(libBounds) }) {
-                Sym("book", tone.content, 24.dp, Modifier.clearAndSetSemantics { contentDescription = t("書籤、下載與設定") })
-            }
-            LiquidGlass(haze, tone, CircleShape, Modifier.weight(1f).height(Dimens.Control), onClick = { vm.incognitoMode = !vm.incognitoMode }) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (vm.incognitoMode) Sym("visibility_off", tone.content, 18.dp, Modifier.padding(end = 6.dp))
-                    val n = vm.visibleTabs().size
-                    Text(
-                        if (n == 1) (if (vm.incognitoMode) t("1 個無痕分頁") else t("1 個分頁")) else if (vm.incognitoMode) t("%1\$s 個無痕分頁", n) else t("%1\$s 個分頁", n),
-                        color = tone.content, fontSize = 16.sp, fontWeight = FontWeight.Medium,
+            // 分段切換：目前這一段墊一塊淺色底，切換時底塊滑過去（不是兩段各自變色）
+            LiquidGlass(haze, tone, CircleShape, Modifier.height(Dimens.Control)) {
+                val n = vm.tabs.count { !it.incognito && !it.isBlank }
+                val labels = listOf(t("無痕"), if (n == 1) t("1 個分頁") else t("%1\$s 個分頁", n))
+                val sel by androidx.compose.animation.core.animateFloatAsState(if (vm.incognitoMode) 0f else 1f, Motion.glass(), label = "seg")
+                var segW by remember { mutableStateOf(listOf(0, 0)) }
+                Box(Modifier.padding(4.dp)) {
+                    Box(
+                        Modifier.matchParentSize().drawBehind {
+                            if (segW.any { it == 0 }) return@drawBehind
+                            val w = androidx.compose.ui.util.lerp(segW[0].toFloat(), segW[1].toFloat(), sel)
+                            val x = segW[0] * sel
+                            drawRoundRect(tone.content.copy(alpha = 0.12f), topLeft = Offset(x, 0f), size = androidx.compose.ui.geometry.Size(w, size.height), cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2))
+                        },
                     )
-                    Sym("expand_more", tone.content, 18.dp)
+                    Row(Modifier.fillMaxHeight()) {
+                        labels.forEachIndexed { i, l ->
+                            Box(
+                                Modifier.fillMaxHeight().onSizeChanged { s -> segW = segW.toMutableList().also { it[i] = s.width } }
+                                    .clip(CircleShape).clickable { vm.incognitoMode = i == 0 }.padding(horizontal = 18.dp),
+                                Alignment.Center,
+                            ) {
+                                val on = (i == 0) == vm.incognitoMode
+                                Text(l, color = tone.content.copy(alpha = if (on) 1f else 0.55f), fontSize = 16.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium, maxLines = 1)
+                            }
+                        }
+                    }
                 }
             }
-            LiquidGlass(haze, tone, CircleShape, Modifier.height(Dimens.Control).testTag("overview_done"), onClick = onDone) {
-                Text(t("完成"), Modifier.padding(horizontal = 20.dp), color = tone.content, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            }
+            // 完成：強調色實心圓＋白色 ✓（Safari）
+            Box(
+                Modifier.size(Dimens.Control).testTag("overview_done").clip(CircleShape).background(accent)
+                    .semantics { contentDescription = t("完成"); role = androidx.compose.ui.semantics.Role.Button }
+                    .clickable(onClick = onDone),
+                Alignment.Center,
+            ) { Sym("check", Color.White, 26.dp) }
         }
     }
 }
