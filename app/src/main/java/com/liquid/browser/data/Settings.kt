@@ -50,6 +50,8 @@ data class Settings(
     val blockRedirects: Boolean = true,
     /** 網址列上方顯示「下載影片」按鈕（偵測到影片時） */
     val videoDownloadButton: Boolean = true,
+    /** 網址列放在畫面頂端（直向時；橫向一律在頂端） */
+    val addressBarTop: Boolean = false,
     /** 介面語言 */
     val appLang: com.liquid.browser.core.AppLang = com.liquid.browser.core.AppLang.System,
 )
@@ -79,6 +81,7 @@ class SettingsStore(private val context: Context) {
         val redirects = booleanPreferencesKey("block_redirects")
         val videoDl = booleanPreferencesKey("video_download_button")
         val appLang = stringPreferencesKey("app_lang")
+        val barTop = booleanPreferencesKey("address_bar_top")
         fun trKey(e: TranslateEngine) = stringPreferencesKey("translate_key_${e.name}")
         fun trModel(e: TranslateEngine) = stringPreferencesKey("translate_model_${e.name}")
     }
@@ -104,6 +107,7 @@ class SettingsStore(private val context: Context) {
         adAllow = this[K.adAllow] ?: emptySet(),
         blockRedirects = this[K.redirects] ?: true,
         videoDownloadButton = this[K.videoDl] ?: true,
+        addressBarTop = this[K.barTop] ?: false,
         appLang = this[K.appLang]?.let { runCatching { com.liquid.browser.core.AppLang.valueOf(it) }.getOrNull() } ?: com.liquid.browser.core.AppLang.System,
     )
 
@@ -125,6 +129,7 @@ class SettingsStore(private val context: Context) {
             p[K.adAllow] = n.adAllow
             p[K.redirects] = n.blockRedirects
             p[K.videoDl] = n.videoDownloadButton
+            p[K.barTop] = n.addressBarTop
             p[K.appLang] = n.appLang.name
             TranslateEngine.entries.forEach { e ->
                 n.translateKeys[e]?.let { p[K.trKey(e)] = it } ?: p.remove(K.trKey(e))

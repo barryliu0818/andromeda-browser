@@ -1,5 +1,7 @@
 package com.liquid.browser.ui.tabs
 
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import com.liquid.browser.core.t
 
 import androidx.compose.animation.AnimatedContent
@@ -92,7 +94,7 @@ import kotlinx.coroutines.launch
  * ponytail: 進出總覽的 shared element 轉場在第 7 階段加入。
  */
 @Composable
-fun TabsOverview(vm: BrowserViewModel, transition: OverviewTransition, onOpen: (Tab) -> Unit, onNew: () -> Unit, onDone: () -> Unit) {
+fun TabsOverview(vm: BrowserViewModel, transition: OverviewTransition, onOpen: (Tab) -> Unit, onNew: () -> Unit, onDone: () -> Unit, onLibrary: (Rect) -> Unit) {
     val haze = rememberHazeState()
     val scope = rememberCoroutineScope()
     val dark = isSystemInDarkTheme() || vm.incognitoMode
@@ -244,6 +246,11 @@ fun TabsOverview(vm: BrowserViewModel, transition: OverviewTransition, onOpen: (
         ) {
             LiquidGlass(haze, tone, CircleShape, Modifier.size(Dimens.Control).onGloballyPositioned { transition.plusBounds = it.boundsInRoot() }, onClick = onNew) {
                 Sym("add", tone.content, 26.dp)
+            }
+            // 資料庫：書籤與歷史紀錄、下載項目、設定（App 層級的功能，不放在網頁的 … 裡）
+            var libBounds by remember { mutableStateOf(Rect.Zero) }
+            LiquidGlass(haze, tone, CircleShape, Modifier.size(Dimens.Control).onGloballyPositioned { libBounds = it.boundsInRoot() }, onClick = { onLibrary(libBounds) }) {
+                Sym("book", tone.content, 24.dp, Modifier.clearAndSetSemantics { contentDescription = t("書籤、下載與設定") })
             }
             LiquidGlass(haze, tone, CircleShape, Modifier.weight(1f).height(Dimens.Control), onClick = { vm.incognitoMode = !vm.incognitoMode }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

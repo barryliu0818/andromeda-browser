@@ -200,6 +200,22 @@ class Tab(
         private set
     val isYouTube get() = pageHost == "youtube.com" || pageHost.endsWith(".youtube.com")
 
+    /** 網頁宣告的語言（小寫，例如 en、zh-tw）；沒宣告或還沒載完為空字串 */
+    var pageLang by androidx.compose.runtime.mutableStateOf("")
+        private set
+
+    /** 這頁已經是 target 語言（依網頁宣告判斷；沒宣告時視為需要翻譯，翻譯鈕照常出現） */
+    fun alreadyIn(target: TargetLang): Boolean {
+        val l = pageLang
+        if (l.isEmpty()) return false
+        return when (target) {
+            TargetLang.ZhTW -> l == "zh-tw" || l == "zh-hk" || l == "zh-mo" || l.startsWith("zh-hant")
+            TargetLang.ZhCN -> l == "zh" || l == "zh-cn" || l == "zh-sg" || l.startsWith("zh-hans")
+            TargetLang.En -> l == "en" || l.startsWith("en-")
+            TargetLang.Ja -> l == "ja" || l.startsWith("ja-")
+        }
+    }
+
     fun setYouTubeSubs(on: Boolean) {
         ytSubs = on
         webView.evaluateJavascript(if (on) "window.__lqYt&&window.__lqYt.start();" else "window.__lqYt&&window.__lqYt.stop();", null)
@@ -350,6 +366,7 @@ class Tab(
                 loadFailed = false
                 // 整頁重新載入：頁面上的字幕翻譯腳本狀態已不在
                 ytSubs = false
+                pageLang = ""
                 themeColor = null
                 readerOn = false
                 findMatches = 0
@@ -379,6 +396,8 @@ class Tab(
                     listener.onVisited(this@Tab, u, title)
                 }
                 view.evaluateJavascript(THEME_COLOR_JS) { themeColor = parseCssColor(it.trim('"')) }
+                // 網頁宣告的語言（<html lang>）：網址列的翻譯鈕只在跟翻譯目標不同時出現
+                view.evaluateJavascript("document.documentElement.lang") { pageLang = it.trim('"').lowercase() }
                 val host = Uri.parse(u).host
                 if (host != null) view.evaluateJavascript(ICON_JS) { r ->
                     val icon = r.trim('"')

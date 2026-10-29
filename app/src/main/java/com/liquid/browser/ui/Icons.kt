@@ -13,6 +13,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontVariation
@@ -56,10 +61,14 @@ fun SymButton(
     size: Dp = 22.dp,
     enabled: Boolean = true,
     alpha: () -> Float = { 1f },
+    /** 給螢幕閱讀器的名稱（含狀態，例如「顯示原文」）；不給時會唸出圖示的連字名稱 */
+    label: String? = null,
     onClick: () -> Unit,
 ) {
     Box(
-        modifier.size(40.dp).graphicsLayer { this.alpha = alpha() }.clip(CircleShape).clickable(enabled = enabled, onClick = onClick),
+        modifier.size(40.dp).graphicsLayer { this.alpha = alpha() }.clip(CircleShape)
+            .then(if (label != null) Modifier.semantics { contentDescription = label; role = Role.Button } else Modifier)
+            .clickable(enabled = enabled, onClick = onClick),
         Alignment.Center,
-    ) { Sym(name, color, size) }
+    ) { Sym(name, color, size, if (label != null) Modifier.clearAndSetSemantics {} else Modifier) }
 }

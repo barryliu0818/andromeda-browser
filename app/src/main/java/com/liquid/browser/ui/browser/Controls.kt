@@ -6,6 +6,7 @@ import androidx.compose.foundation.Canvas
 import com.liquid.browser.browser.DlStatus
 import com.liquid.browser.browser.DownloadEngine
 import androidx.compose.animation.core.Animatable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.geometry.CornerRadius
@@ -120,6 +121,8 @@ fun Controls(
     onTabs: () -> Unit,
     onDownloads: () -> Unit,
     onPageMenu: (Rect) -> Unit,
+    /** 網址列的翻譯鈕；anchor 給 YouTube 的兩項小選單 */
+    onTranslate: (Rect) -> Unit,
     onBackLongPress: (Rect) -> Unit,
     onTabsLongPress: (Rect) -> Unit,
     pillGestures: PillGestures,
@@ -187,7 +190,12 @@ fun Controls(
                 // 網域文字與完整網址輸入框之間淡入淡出
                 Crossfade(focused, animationSpec = Motion.timed(Motion.ShortMs), label = "url") { f ->
                     if (f) UrlInput(query, tone, accent, onQuery, onSubmit)
-                    else UrlLabel(tab, tone, p, iconAlpha, onPageMenu, onDownloads) { expand() }
+                    else {
+                        // 翻譯鈕：網頁已經是翻譯目標語言時不出現（YouTube 有字幕翻譯，一律出現；翻譯中／已翻譯也留著，用來切回原文）
+                        val target = vm.settings.collectAsState().value.translateTarget
+                        val canTranslate = !tab.isBlank && (tab.isYouTube || tab.translated || !tab.alreadyIn(target))
+                        UrlLabel(tab, tone, p, iconAlpha, onPageMenu, onDownloads, if (canTranslate) onTranslate else null) { expand() }
+                    }
                 }
                 Progress(tab.progress, accent, Modifier.align(Alignment.BottomStart))
             }
@@ -342,8 +350,12 @@ private fun Modifier.pillDrag(enabled: Boolean, g: PillGestures) = pointerInput(
 
 /** 未聚焦的網址列：左 aA 頁面選單、中網域、右重新整理／停止。收合時兩側淡出、網域縮小。 */
 @Composable
-private fun UrlLabel(tab: Tab, tone: Tone, p: () -> Float, iconAlpha: () -> Float, onPageMenu: (Rect) -> Unit, onDownloads: () -> Unit, onCollapsedTap: () -> Unit) {
+private fun UrlLabel(
+    tab: Tab, tone: Tone, p: () -> Float, iconAlpha: () -> Float, onPageMenu: (Rect) -> Unit, onDownloads: () -> Unit,
+    onTranslate: ((Rect) -> Unit)?, onCollapsedTap: () -> Unit,
+) {
     var menuBounds by remember { mutableStateOf(Rect.Zero) }
+    var trBounds by remember { mutableStateOf(Rect.Zero) }
     // 收合時兩側按鈕不可見，點到它們等同點小膠囊（展開）；不在組合階段讀進度，避免捲動時重組
     Row(Modifier.fillMaxSize().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         SymButton(
@@ -371,6 +383,16 @@ private fun UrlLabel(tab: Tab, tone: Tone, p: () -> Float, iconAlpha: () -> Floa
         }
         // 有下載項目時顯示下載圖示（下載中外圈顯示總進度），點擊進入「下載項目」
         if (DownloadEngine.tasks.isNotEmpty()) DownloadIndicator(tone, iconAlpha) { if (p() > 0.5f) onCollapsedTap() else onDownloads() }
+        // 翻譯鈕：已翻譯（或 YouTube 字幕翻譯開著）時用強調色，一眼看出這頁正在翻譯
+        if (onTranslate != null) SymButton(
+            "translate", if (tab.translated || tab.ytSubs) accent else tone.content,
+            Modifier.onGloballyPositioned { trBounds = it.boundsInRoot() }, size = 20.dp, alpha = iconAlpha,
+            label = when {
+                tab.isYouTube -> t("翻譯選項")
+                tab.translated -> t("顯示原文")
+                else -> t("翻譯網頁")
+            },
+        ) { if (p() > 0.5f) onCollapsedTap() else onTranslate(trBounds) }
         val loading = tab.progress < 100
         SymButton(
             if (loading) "close" else "refresh", tone.content, size = 20.dp,

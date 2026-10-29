@@ -231,11 +231,18 @@ fun SettingsContent(vm: BrowserViewModel, tone: Tone) {
         // 外觀
         item { GroupHeader(t("外觀"), tone) }
         item {
-            GroupToggle(0, 2, tone, t("降低透明度"), s.reduceTransparency, leading = { IconTile("contrast", Color(0xFF8E8E93)) }) { v -> vm.updateSettings { it.copy(reduceTransparency = v) } }
+            // 直向時網址列在底部（單手好按）或頂部（傳統瀏覽器的位置）；橫向一律在頂部
+            GroupMenuRow(
+                0, 3, tone, t("網址列位置"), listOf(t("底部"), t("頂部")), if (s.addressBarTop) 1 else 0,
+                leading = { IconTile("swap_vert", accent) },
+            ) { i -> vm.updateSettings { it.copy(addressBarTop = i == 1) } }
+        }
+        item {
+            GroupToggle(1, 3, tone, t("降低透明度"), s.reduceTransparency, leading = { IconTile("contrast", Color(0xFF8E8E93)) }) { v -> vm.updateSettings { it.copy(reduceTransparency = v) } }
         }
         item {
             GroupRow(
-                1, 2, tone, t("起始頁背景圖"), subtitle = if (s.startBackground != null) t("已設定") else t("預設（搜尋引擎色場）"),
+                2, 3, tone, t("起始頁背景圖"), subtitle = if (s.startBackground != null) t("已設定") else t("預設（搜尋引擎色場）"),
                 leading = { IconTile("wallpaper", Color(0xFFAF52DE)) },
                 onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                 trailing = {

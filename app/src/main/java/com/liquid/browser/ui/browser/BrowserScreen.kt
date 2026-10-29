@@ -168,6 +168,8 @@ fun BrowserScreen(vm: BrowserViewModel) {
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    // 網址列在頂端：橫向一律如此，直向看設定
+    val barTop = landscape || settings.addressBarTop
     var focused by remember { mutableStateOf(false) }
     var overview by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf(TextFieldValue()) }
@@ -309,6 +311,8 @@ fun BrowserScreen(vm: BrowserViewModel) {
             }
         }
     }
+    // 總覽底部資料庫鈕的位置：按下時記下，選單在下面 pageActions 建好後打開
+    var libraryAt by remember { mutableStateOf<Rect?>(null) }
     // 分頁總覽疊在瀏覽畫面上面（不再把瀏覽畫面整個拿掉）：網頁一直留在畫面裡，回到分頁時不必重新接上、重新排版
     val overviewLayer: (@Composable () -> Unit)? = if (!overview) null else { {
         // 網頁從狀態列下方開始，縮圖也是；飛行卡片的全螢幕位置對齊網頁區域
@@ -333,6 +337,7 @@ fun BrowserScreen(vm: BrowserViewModel) {
                 onOpen = { leave(it) },
                 onNew = { leave(null) },
                 onDone = { leave(vm.current) },
+                onLibrary = { libraryAt = it },
             )
             FlyingCard(ov, fullRect, bg)
         }
@@ -420,7 +425,8 @@ fun BrowserScreen(vm: BrowserViewModel) {
         onFind = { finding = true },
         onLibrary = {
             sheet.show { dismiss ->
-                StartPage(vm, menu, Modifier.fillMaxSize(), initialPage = 1) { url -> tab.load(url); dismiss() }
+                // 從總覽打開的：開了書籤就離開總覽，看得到載入的網頁
+                StartPage(vm, menu, Modifier.fillMaxSize(), initialPage = 1) { url -> tab.load(url); dismiss(); overview = false }
             }
         },
         onDownloads = { sheet.show { DownloadsContent(menuTone) } },
@@ -442,6 +448,10 @@ fun BrowserScreen(vm: BrowserViewModel) {
             }
         },
     )
+    LaunchedEffect(libraryAt) {
+        libraryAt?.let { menu.show(libraryMenu(it, pageActions)) }
+        libraryAt = null
+    }
 
     // 沒有原生 backdrop 時，網頁上與輸入中的玻璃改用輕量磨砂底（網頁上的控制列另有系統模糊視窗）
     androidx.compose.runtime.CompositionLocalProvider(LocalOpaqueGlass provides (!PlatformBackdrop && (!tab.isBlank || focused)), LocalCheapGlass provides (!PlatformBackdrop && tab.isBlank)) {
@@ -513,11 +523,15 @@ fun BrowserScreen(vm: BrowserViewModel) {
                         val collapsedPx = with(density) { (Dimens.ControlCollapsed + Dimens.NavGap * 2).roundToPx() }
                         // 直向收合成小膠囊時，網頁底部的留白跟著縮小（否則網站的底部導覽列下面空一大段）：
                         // 等收合動畫跑完才改，網頁只重排一次；展開則立即恢復，展開中的網址列不會蓋住網站的底部列
-                        val collapsedNow = vm.collapsed && !landscape
-                        LaunchedEffect(tab, landscape, navBottom, collapsedNow) {
+                        val collapsedNow = vm.collapsed && !barTop
+                        LaunchedEffect(tab, landscape, barTop, navBottom, collapsedNow) {
                             if (collapsedNow) delay(360)
-                            if (landscape) tab.setControlsInset(0, controlsPx)
-                            else tab.setControlsInset(navBottom + if (collapsedNow) collapsedPx else controlsPx, 0)
+                            when {
+                                landscape -> tab.setControlsInset(0, controlsPx)
+                                // 直向、網址列在頂端：上方讓出網址列，下方只讓出手勢導覽列
+                                barTop -> tab.setControlsInset(navBottom, controlsPx)
+                                else -> tab.setControlsInset(navBottom + if (collapsedNow) collapsedPx else controlsPx, 0)
+                            }
                         }
                         key(tab.id) {
                             Box(Modifier.fillMaxWidth().weight(1f)) {
@@ -552,11 +566,11 @@ fun BrowserScreen(vm: BrowserViewModel) {
             // 鍵盤：不用 imePadding（鍵盤動畫每一幀都會重新量測、排版整列玻璃），改在擺放階段位移，每幀只移動位置
             val imeInsets = WindowInsets.ime
             val navInsets = WindowInsets.navigationBars
-            val place = (if (landscape) Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = Dimens.NavGap)
+            val place = (if (barTop) Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = Dimens.NavGap)
             else Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = Dimens.NavGap))
                 .offset {
-                    val lift = if (landscape) 0 else (imeInsets.getBottom(this) - navInsets.getBottom(this)).coerceAtLeast(0)
-                    IntOffset(0, ((if (landscape) -1f else 1f) * hide.value * hideShift).roundToInt() - lift)
+                    val lift = if (barTop) 0 else (imeInsets.getBottom(this) - navInsets.getBottom(this)).coerceAtLeast(0)
+                    IntOffset(0, ((if (barTop) -1f else 1f) * hide.value * hideShift).roundToInt() - lift)
                 }
             Column(
                 place.widthIn(max = if (landscape) Dimens.LandscapeMaxWidth else 10_000.dp)
@@ -572,8 +586,8 @@ fun BrowserScreen(vm: BrowserViewModel) {
                         }
                     }
                 }
-                // 網址列上方的浮動膠囊：翻譯狀態（點一下切回原文）＋ IDM 式「下載影片」；以彈簧從網址列「長」出來
-                val showTr = tab.translated && !focused && !finding
+                // 網址列上方的浮動膠囊：翻譯進度（翻完就收起，已翻譯的狀態改由網址列翻譯鈕的顏色表示）＋ IDM 式「下載影片」
+                val showTr = tab.translated && tab.trDone < tab.trSent && !focused && !finding
                 val showDl = tab.media.isNotEmpty() && !focused && !finding && settings.videoDownloadButton
                 AnimatedVisibility(showTr || showDl, enter = expandVertically(Motion.glass()) + fadeIn(), exit = shrinkVertically(Motion.glass()) + fadeOut()) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
@@ -630,7 +644,7 @@ fun BrowserScreen(vm: BrowserViewModel) {
                         }
                     }
                 }
-                if (!landscape) panel()
+                if (!barTop) panel()
                 val controlsRow = @Composable { toMain: (Rect) -> Rect, onGlass: ((List<Rect>) -> Unit)? ->
                     BoxWithConstraints(Modifier.fillMaxWidth()) {
                         val rowW = constraints.maxWidth.toFloat()
@@ -655,6 +669,8 @@ fun BrowserScreen(vm: BrowserViewModel) {
                                 onTabs = { enterOverview(null) },
                                 onDownloads = { pageActions.onDownloads() },
                                 onPageMenu = { anchor -> menu.show(pageMenu(toMain(anchor), tab, vm, menuTone, context, pageActions)) },
+                                // 一般網頁直接翻譯／切回原文；YouTube 跳出「翻譯網頁／翻譯字幕」
+                                onTranslate = { anchor -> if (tab.isYouTube) menu.show(translateMenu(toMain(anchor), tab, vm)) else vm.toggleTranslate(tab) },
                                 // 長按返回：列出上一頁歷史（最近的在最上面），點一下直接跳回那一頁
                                 onBackLongPress = { anchor ->
                                     val list = tab.webView.copyBackForwardList()
@@ -680,7 +696,7 @@ fun BrowserScreen(vm: BrowserViewModel) {
                                     )
                                 },
                                 pillGestures = gestures,
-                                alignTop = landscape,
+                                alignTop = barTop,
                                 onGlassBounds = onGlass,
                             )
                         }
@@ -703,23 +719,25 @@ fun BrowserScreen(vm: BrowserViewModel) {
                         controlsRow(toMain) { if (inWindow) glass = it }
                     }
                 } else controlsRow({ it }, null)
-                if (landscape) panel()
+                if (barTop) panel()
             }
 
             if (vm.controlsHidden) {
                 Box(
-                    Modifier.align(if (landscape) Alignment.TopCenter else Alignment.BottomCenter).fillMaxWidth().height(56.dp)
+                    Modifier.align(if (barTop) Alignment.TopCenter else Alignment.BottomCenter).fillMaxWidth().height(56.dp)
                         .pointerInput(Unit) { detectTapGestures { vm.controlsHidden = false } },
                 )
             }
 
             // 跳轉 App 提示列（在網址列上方）；提示訊息同時出現時往上讓開
-            AppPromptBar(vm, haze, menuTone, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 72.dp))
+            // 網址列在頂端時底部空出來，提示列與提示訊息貼近底部
+            val above = if (barTop) 16.dp else 72.dp
+            AppPromptBar(vm, haze, menuTone, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = above))
 
             // 玻璃提示訊息
             AnimatedVisibility(
                 vm.toast != null,
-                Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = if (vm.appPrompt?.tab == vm.current) 132.dp else 72.dp),
+                Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = if (vm.appPrompt?.tab == vm.current) above + 60.dp else above),
                 enter = fadeIn() + slideInVertically { it / 2 },
                 exit = fadeOut(),
             ) {
@@ -730,11 +748,12 @@ fun BrowserScreen(vm: BrowserViewModel) {
 
             val statusTop = WindowInsets.statusBars.getTop(LocalDensity.current).toFloat()
             LinkPreviewHost(vm, haze, menuTone, statusTop)
-            GlassMenuHost(menu, haze, menuTone)
-            GlassSheetHost(sheet, haze, menuTone)
 
             // 分頁總覽：跟首頁同一套（沒有原生 backdrop 時用 Material 3 表面）
             overviewLayer?.let { layer -> androidx.compose.runtime.CompositionLocalProvider(LocalOpaqueGlass provides false, LocalCheapGlass provides !PlatformBackdrop) { layer() } }
+            // 選單與面板畫在總覽之上：總覽的資料庫鈕打開的選單、面板（書籤、下載、設定）關掉後回到總覽
+            GlassMenuHost(menu, haze, menuTone)
+            GlassSheetHost(sheet, haze, menuTone)
 
             // 網頁影片全螢幕：隱藏系統列、允許旋轉
             vm.customView?.let { fullscreen ->

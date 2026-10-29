@@ -284,6 +284,12 @@ internal val ZH_CN: Map<String, String> = hashMapOf(
     "首頁標誌快速切換（選兩個）" to "首页标志快速切换（选两个）",
     "騰訊翻譯 HTTP %1\$s" to "腾讯翻译 HTTP %1\$s",
     "點擊畫面底部可叫回控制項" to "点击屏幕底部可唤回控制项",
+    "點擊畫面頂部可叫回控制項" to "点击屏幕顶部可唤回控制项",
+    "翻譯選項" to "翻译选项",
+    "書籤、下載與設定" to "书签、下载与设置",
+    "網址列位置" to "地址栏位置",
+    "底部" to "底部",
+    "頂部" to "顶部",
     "（請先在阿里雲百煉控制台開通 %1\$s）" to "（请先在阿里云百炼控制台开通 %1\$s）",
 )
 
@@ -569,6 +575,12 @@ internal val EN: Map<String, String> = hashMapOf(
     "首頁標誌快速切換（選兩個）" to "Logo quick switch (choose two)",
     "騰訊翻譯 HTTP %1\$s" to "Tencent Translate HTTP %1\$s",
     "點擊畫面底部可叫回控制項" to "Tap the bottom of the screen to bring back the toolbar",
+    "點擊畫面頂部可叫回控制項" to "Tap the top of the screen to bring back the toolbar",
+    "翻譯選項" to "Translation options",
+    "書籤、下載與設定" to "Bookmarks, downloads and settings",
+    "網址列位置" to "Address bar position",
+    "底部" to "Bottom",
+    "頂部" to "Top",
     "（請先在阿里雲百煉控制台開通 %1\$s）" to " (enable %1\$s in the Alibaba Cloud Model Studio console first)",
 )
 
@@ -854,5 +866,11 @@ internal val JA: Map<String, String> = hashMapOf(
     "首頁標誌快速切換（選兩個）" to "ロゴで切り替え（2 つ選択）",
     "騰訊翻譯 HTTP %1\$s" to "Tencent 翻訳 HTTP %1\$s",
     "點擊畫面底部可叫回控制項" to "画面下部をタップするとツールバーが戻ります",
+    "點擊畫面頂部可叫回控制項" to "画面上部をタップするとツールバーが戻ります",
+    "翻譯選項" to "翻訳オプション",
+    "書籤、下載與設定" to "ブックマーク・ダウンロード・設定",
+    "網址列位置" to "アドレスバーの位置",
+    "底部" to "下",
+    "頂部" to "上",
     "（請先在阿里雲百煉控制台開通 %1\$s）" to "（先に Alibaba Cloud Model Studio コンソールで %1\$s を有効にしてください）",
 )

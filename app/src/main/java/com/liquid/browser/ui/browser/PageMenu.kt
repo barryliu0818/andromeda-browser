@@ -83,32 +83,48 @@ class PageMenuActions(
 )
 
 /**
- * 頁面選單（點網址列左側 aA）：頂部四個圓形快捷鈕（分享、加入書籤、新增分頁、閱讀器）、
- * 文字大小「小 A ─ 百分比 ─ 大 A」，以及 2.6 規格的選單項目。
+ * 頁面選單（點網址列左側 …）：只放「這一頁」的動作——頂部四個圓形快捷鈕（分享、加入書籤、閱讀列表、閱讀器）、
+ * 文字大小「小 A ─ 百分比 ─ 大 A」、尋找／桌面版／網站設定／隱藏控制項。
+ * 翻譯在網址列的翻譯鈕；書籤與歷史、下載、設定這些 App 層級的功能在分頁總覽的「資料庫」鈕與起始頁的 … 裡。
+ * 起始頁沒有網頁：… 直接是資料庫選單。
  */
-fun pageMenu(anchor: Rect, tab: Tab, vm: BrowserViewModel, tone: Tone, context: Context, actions: PageMenuActions) = MenuSpec(
+fun pageMenu(anchor: Rect, tab: Tab, vm: BrowserViewModel, tone: Tone, context: Context, actions: PageMenuActions) =
+    if (tab.isBlank) libraryMenu(anchor, actions, withReport = true)
+    else MenuSpec(
+        anchor = anchor,
+        width = 290,
+        header = { dismiss -> PageMenuHeader(tab, vm, tone, dismiss) },
+        items = listOf(
+            MenuItem(t("在此頁面上尋找"), "search") { actions.onFind() },
+            if (tab.desktop) MenuItem(t("要求行動版網站"), "smartphone") { tab.setDesktopMode(false) }
+            else MenuItem(t("要求桌面版網站"), "computer") { tab.setDesktopMode(true) },
+            MenuItem(t("網站設定"), "tune") { actions.onSiteSettings() },
+            MenuItem(t("隱藏控制項"), "unfold_less") {
+                vm.controlsHidden = true
+                val top = vm.settings.value.addressBarTop ||
+                    context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+                vm.showToast(if (top) t("點擊畫面頂部可叫回控制項") else t("點擊畫面底部可叫回控制項"))
+            },
+            MenuItem(t("回報問題"), "bug_report") { actions.onReport() },
+        ),
+    )
+
+/** 資料庫選單（App 層級）：書籤與歷史紀錄、下載項目、設定；起始頁的 … 另外加上回報問題 */
+fun libraryMenu(anchor: Rect, actions: PageMenuActions, withReport: Boolean = false) = MenuSpec(
     anchor = anchor,
-    width = 290,
-    header = { dismiss -> PageMenuHeader(tab, vm, tone, dismiss) },
     items = listOf(
         MenuItem(t("書籤與歷史紀錄"), "book") { actions.onLibrary() },
         MenuItem(t("下載項目"), "download") { actions.onDownloads() },
-        MenuItem(t("加入閱讀列表"), "eyeglasses") { vm.addToReadingList(tab) },
-        MenuItem(t("在此頁面上尋找"), "search") { actions.onFind() },
-        if (tab.desktop) MenuItem(t("要求行動版網站"), "smartphone") { tab.setDesktopMode(false) }
-        else MenuItem(t("要求桌面版網站"), "computer") { tab.setDesktopMode(true) },
-        MenuItem(t("隱藏控制項"), "unfold_less") {
-            vm.controlsHidden = true
-            vm.showToast(t("點擊畫面底部可叫回控制項"))
-        },
-        MenuItem(t("網站設定"), "tune") { actions.onSiteSettings() },
-        // 直接翻成設定裡選好的語言（設定 → 網頁翻譯 → 翻譯成）
-        MenuItem(if (tab.translated) t("顯示原文") else t("翻譯網頁"), "translate") { vm.toggleTranslate(tab) },
-    ) + (if (tab.isYouTube) listOf(
-        MenuItem(if (tab.ytSubs) t("關閉字幕翻譯") else t("翻譯字幕"), "subtitles") { vm.toggleYouTubeSubs(tab) },
-    ) else emptyList()) + listOf(
         MenuItem(t("設定"), "settings") { actions.onSettings() },
-        MenuItem(t("回報問題"), "bug_report") { actions.onReport() },
+    ) + if (withReport) listOf(MenuItem(t("回報問題"), "bug_report") { actions.onReport() }) else emptyList(),
+)
+
+/** 網址列的翻譯鈕（YouTube）：翻譯網頁與翻譯字幕兩項 */
+fun translateMenu(anchor: Rect, tab: Tab, vm: BrowserViewModel) = MenuSpec(
+    anchor = anchor,
+    items = listOf(
+        MenuItem(if (tab.translated) t("顯示原文") else t("翻譯網頁"), "translate") { vm.toggleTranslate(tab) },
+        MenuItem(if (tab.ytSubs) t("關閉字幕翻譯") else t("翻譯字幕"), "subtitles") { vm.toggleYouTubeSubs(tab) },
     ),
 )
 
@@ -124,9 +140,9 @@ private fun PageMenuHeader(tab: Tab, vm: BrowserViewModel, tone: Tone, dismiss: 
         QuickButton(if (bookmarked) "bookmark_added" else "bookmark_add", if (bookmarked) t("已加入") else t("加入書籤"), tone, active = bookmarked) {
             vm.toggleBookmark(tab)
         }
-        QuickButton("add", t("新增分頁"), tone) {
+        QuickButton("eyeglasses", t("閱讀列表"), tone) {
             dismiss()
-            vm.newTab()
+            vm.addToReadingList(tab)
         }
         QuickButton("chrome_reader_mode", t("閱讀器"), tone, active = tab.readerOn) {
             dismiss()
