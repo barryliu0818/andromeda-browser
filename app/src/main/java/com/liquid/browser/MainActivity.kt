@@ -217,6 +217,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        // 測試用（只有 debug 版）：adb shell am start -n <pkg>/com.liquid.browser.MainActivity --es debug_layout Top
+        // 直接切換網址列版面，自動化測試三種版面時不必每次點進設定
+        if (BuildConfig.DEBUG) intent.getStringExtra("debug_layout")?.let { name ->
+            runCatching { com.liquid.browser.data.BarLayout.valueOf(name) }.getOrNull()?.let { l -> vm.updateSettings { it.copy(barLayout = l) } }
+            return
+        }
         intent.dataString?.let { vm.newTab(it) }
     }
 

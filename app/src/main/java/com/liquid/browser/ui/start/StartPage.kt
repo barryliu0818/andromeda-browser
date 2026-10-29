@@ -1,5 +1,10 @@
 package com.liquid.browser.ui.start
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.text.style.TextAlign
+import com.liquid.browser.data.ReadingItem
 import com.liquid.browser.core.t
 
 import android.content.Intent
@@ -118,34 +123,44 @@ import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.sin
 
-/** 分段名稱：每次讀取時翻譯（介面語言切換後立即生效） */
-private val Sections get() = listOf(t("常用網站"), t("書籤"), t("閱讀列表"), t("歷史紀錄"))
+/** 分段（Safari 起始頁頂部那條）：圖示＋給螢幕閱讀器的名稱；名稱每次讀取時翻譯（介面語言切換後立即生效） */
+private val Sections get() = listOf("grid_view" to t("常用網站"), "book" to t("書籤"), "eyeglasses" to t("閱讀列表"), "history" to t("歷史紀錄"))
 
 /**
- * 起始頁（新分頁）：頂部液態玻璃分段標籤＋可左右滑動的四個頁面。
- * 底部只有浮動網址列（由 BrowserScreen 提供），所以內容底部留白。
+ * 起始頁（Safari）：頂部液態玻璃分段（常用網站／書籤／閱讀列表／歷史紀錄，圖示）＋可左右滑動的四個頁面。
+ * 新分頁（[HomePage]）與「書籤與歷史紀錄」面板共用；搜尋與輸入網址由網址列負責。
+ * glow：沒有自訂背景圖時，鋪一層搜尋引擎品牌色的柔和色場（新分頁用；面板裡不用）。
  */
 @Composable
-fun StartPage(vm: BrowserViewModel, menu: MenuState, modifier: Modifier, initialPage: Int = 0, onOpen: (String) -> Unit) {
+fun StartPage(
+    vm: BrowserViewModel, menu: MenuState, modifier: Modifier, initialPage: Int = 0, glow: Boolean = false,
+    /** 網址列佔掉的上方／下方空間（依網址列版面）：分段列放在上方網址列下面，清單底部讓出下方的網址列或工具列 */
+    barTop: Dp = 0.dp, barBottom: Dp = 120.dp,
+    onOpen: (String) -> Unit,
+) {
     val tab = vm.current ?: return
     val dark = tab.incognito || isSystemInDarkTheme()
     val content = if (dark) Color.White else Palette.Ink
     val tone = if (tab.incognito) Tone.Incognito else if (dark) Tone.Dark else Tone.Light
     val pager = rememberPagerState(initialPage) { Sections.size }
-    val background = vm.settings.collectAsState().value.startBackground
+    val settings by vm.settings.collectAsState()
+    val background = settings.startBackground
     val haze = rememberHazeState()
     val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-    val bottomSpace = PaddingValues(start = 20.dp, end = 20.dp, top = top + 68.dp, bottom = 120.dp)
+    // 上方讓出網址列（頂部版面）與分段列（8＋44＋16），下方讓出網址列／工具列（再多 20dp 呼吸空間）
+    val bottomSpace = PaddingValues(start = 20.dp, end = 20.dp, top = top + barTop + 68.dp, bottom = barBottom + 20.dp)
 
     Box(modifier) {
-        // 自訂背景圖（帶模糊）：Android 12+ 用 RenderEffect 模糊，舊版改為加深遮罩
-        if (background != null) Box(Modifier.fillMaxSize().hazeSource(haze)) {
-            AsyncImage(background, null, Modifier.fillMaxSize().blur(24.dp), contentScale = ContentScale.Crop)
-            Box(Modifier.fillMaxSize().background((if (dark) Color.Black else Color.White).copy(alpha = if (Build.VERSION.SDK_INT >= 31) 0.25f else 0.55f)))
+        // 玻璃的取樣來源：自訂背景圖（帶模糊），或搜尋引擎色場；Android 12 以下改加深遮罩
+        Box(Modifier.fillMaxSize().hazeSource(haze)) {
+            if (background != null) {
+                AsyncImage(background, null, Modifier.fillMaxSize().blur(24.dp), contentScale = ContentScale.Crop)
+                Box(Modifier.fillMaxSize().background((if (dark) Color.Black else Color.White).copy(alpha = if (Build.VERSION.SDK_INT >= 31) 0.25f else 0.55f)))
+            } else if (glow) EngineGlow(settings.engine, dark)
         }
         HorizontalPager(pager, Modifier.fillMaxSize().hazeSource(haze), beyondViewportPageCount = 1) { page ->
             when (page) {
-                0 -> if (tab.incognito) IncognitoNote(content, bottomSpace) else TopSitesPage(vm, content, tone, bottomSpace, onOpen)
+                0 -> if (tab.incognito) IncognitoNote(content, bottomSpace) else FavoritesPage(vm, menu, content, tone, haze, bottomSpace, pager, onOpen)
                 1 -> BookmarksPage(vm, content, tone, bottomSpace, onOpen)
                 2 -> ReadingListPage(vm, menu, content, tone, bottomSpace, onOpen)
                 else -> HistoryPage(vm, menu, content, tone, bottomSpace, onOpen)
@@ -153,45 +168,44 @@ fun StartPage(vm: BrowserViewModel, menu: MenuState, modifier: Modifier, initial
         }
         GlassSegments(
             pager, haze, tone,
-            Modifier.statusBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth().height(40.dp),
+            Modifier.statusBarsPadding().padding(top = barTop).padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth().height(44.dp),
         )
     }
 }
 
-/** 玻璃分段標籤：選取指示器是一顆跟著頁面位置滑動的玻璃膠囊，滑動途中依速度輕微拉伸。 */
+/**
+ * 玻璃分段：選中的那段墊一顆白色膠囊（深色為深灰），跟著手指滑動頁面的位置即時移動，
+ * 滑到兩段之間時輕微拉長（只拉伸、不回彈）。位移與拉伸都在繪製階段讀，滑動時不重組。
+ */
 @Composable
 private fun GlassSegments(pager: PagerState, haze: dev.chrisbanes.haze.HazeState, tone: Tone, modifier: Modifier) {
     val scope = rememberCoroutineScope()
-    // 小米樣式分段：選中項是白色膠囊（深色為深灰）＋黑字
     val darkSeg = tone.content.luminance() > 0.5f
     LiquidGlass(haze, tone, CircleShape, modifier) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val seg = maxWidth / Sections.size
             Box(
-                Modifier.width(seg).fillMaxHeight().padding(3.dp)
+                Modifier.width(seg).fillMaxHeight().padding(4.dp)
                     .graphicsLayer {
                         val pos = pager.currentPage + pager.currentPageOffsetFraction
                         translationX = pos * seg.toPx()
                         val frac = pos - floor(pos)
-                        val stretch = 1f + 0.22f * sin(PI * frac).toFloat()
-                        scaleX = stretch
-                        scaleY = 1f - (stretch - 1f) * 0.25f
+                        scaleX = 1f + 0.18f * sin(PI * frac).toFloat()
                     }
                     .clip(CircleShape).background(if (darkSeg) Color(0xFF48484A) else Color.White),
             )
             Row(Modifier.fillMaxSize()) {
-                Sections.forEachIndexed { i, label ->
+                Sections.forEachIndexed { i, (icon, label) ->
+                    val on = pager.targetPage == i
                     Box(
                         Modifier.weight(1f).fillMaxHeight().clip(CircleShape)
+                            .semantics { contentDescription = label; selected = on; role = Role.Tab }
                             .clickable { scope.launch { pager.animateScrollToPage(i, animationSpec = Motion.glass()) } },
                         Alignment.Center,
                     ) {
-                        Text(
-                            label, color = tone.content,
-                            fontSize = 14.sp,
-                            fontWeight = if (pager.targetPage == i) FontWeight.Medium else FontWeight.Normal,
-                            maxLines = 1,
-                        )
+                        // 選中的圖示實心深色、其他淡一點（不只靠底塊表示選中）
+                        val a by animateFloatAsState(if (on) 1f else 0.6f, Motion.timed(), label = "seg$i")
+                        Sym(icon, tone.content, 21.dp, Modifier.graphicsLayer { alpha = a })
                     }
                 }
             }
@@ -199,37 +213,51 @@ private fun GlassSegments(pager: PagerState, haze: dev.chrisbanes.haze.HazeState
     }
 }
 
+/** 無痕起始頁（Safari 私密瀏覽）：舉手圖示＋說明 */
 @Composable
 private fun IncognitoNote(content: Color, padding: PaddingValues) {
-    Column(Modifier.fillMaxSize().padding(padding), horizontalAlignment = Alignment.CenterHorizontally) {
-        Spacer(Modifier.height(80.dp))
-        Sym("visibility_off", content, 48.dp)
-        Text(t("無痕瀏覽"), Modifier.padding(top = 16.dp), color = content, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+    Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Sym("back_hand", content.copy(alpha = 0.55f), 52.dp)
+        Text(t("無痕瀏覽"), Modifier.padding(top = 14.dp), color = content.copy(alpha = 0.75f), fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
         Text(
-            t("無痕瀏覽不會記錄你的瀏覽紀錄"),
+            t("關閉無痕分頁後，不會留下瀏覽紀錄、搜尋紀錄與 Cookie"),
             Modifier.padding(top = 8.dp),
-            color = content.copy(alpha = 0.7f), fontSize = 15.sp,
+            color = content.copy(alpha = 0.55f), fontSize = 15.sp, textAlign = TextAlign.Center, lineHeight = 21.sp,
         )
     }
 }
 
-/** 常用網站：4 欄圖示格（依序淡入）、經常造訪、最近關閉的分頁。 */
+/**
+ * 常用網站頁（Safari 起始頁）：「常用網站」4×2 圖示格、「閱讀列表」最多三張玻璃卡片、最近關閉的分頁。
+ * 每段標題右側「全部顯示 ›」切到對應的分段頁。
+ */
 @Composable
-private fun TopSitesPage(vm: BrowserViewModel, content: Color, tone: Tone, padding: PaddingValues, onOpen: (String) -> Unit) {
+private fun FavoritesPage(
+    vm: BrowserViewModel, menu: MenuState, content: Color, tone: Tone, haze: dev.chrisbanes.haze.HazeState,
+    padding: PaddingValues, pager: PagerState, onOpen: (String) -> Unit,
+) {
     val icons by vm.icons.collectAsState()
-    val frequent by vm.frequent.collectAsState()
+    val scope = rememberCoroutineScope()
+    val reading by remember { vm.db.reading().all() }.collectAsState(emptyList())
+    val sites = vm.topSites()
+    val showAll = { page: Int -> scope.launch { pager.animateScrollToPage(page, animationSpec = Motion.glass()) }; Unit }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = padding) {
-        item { SectionTitle(t("常用網站"), content) }
-        item { TopSites(vm.topSites(), icons, content, onPick = onOpen) }
-        if (frequent.isNotEmpty()) {
-            item { SectionTitle(t("經常造訪"), content, top = 28.dp) }
-            itemsIndexed(frequent, key = { _, f -> "f${f.host}" }) { i, f ->
-                SiteRow("https://${f.host}", f.title.ifBlank { f.host }, f.host, icons, content, Modifier.animateItem(), Triple(i, frequent.size, tone)) { onOpen("https://${f.host}") }
+        item(key = "fav") {
+            SectionHeader(t("常用網站"), content, if (sites.size > 8) ({ showAll(1) }) else null)
+            TopSites(sites.take(8), icons, content, onPick = onOpen)
+        }
+        if (reading.isNotEmpty()) {
+            item(key = "rl") { SectionHeader(t("閱讀列表"), content, { showAll(2) }, top = 28.dp) }
+            itemsIndexed(reading.take(3), key = { _, r -> "r${r.url}" }) { i, r ->
+                ReadingCard(r, content, tone, haze, i, Modifier.animateItem()) {
+                    scope.launch { vm.db.reading().setRead(r.url, true) }
+                    onOpen(r.url)
+                }
             }
         }
         if (vm.recentlyClosed.isNotEmpty()) {
-            item { SectionTitle(t("最近關閉的分頁"), content, top = 28.dp) }
-            val closed = vm.recentlyClosed
+            item(key = "rc") { SectionHeader(t("最近關閉的分頁"), content, null, top = 28.dp) }
+            val closed = vm.recentlyClosed.take(5)
             itemsIndexed(closed, key = { _, v -> "c${v.url}" }) { i, v ->
                 SiteRow(v.url, v.title.ifBlank { v.url }, Uri.parse(v.url).host.orEmpty(), icons, content, Modifier.animateItem(), Triple(i, closed.size, tone)) { onOpen(v.url) }
             }
@@ -237,42 +265,67 @@ private fun TopSitesPage(vm: BrowserViewModel, content: Color, tone: Tone, paddi
     }
 }
 
-/**
- * 新分頁首頁（參照 Chrome）：只有置中的搜尋引擎標誌、搜尋框、圖片搜尋／無痕模式。
- * 書籤、閱讀列表、歷史紀錄改從頁面選單（aA）的「書籤與歷史紀錄」（StartPage 分段頁）進入。
- */
+/** 段落標題（Safari）：粗體標題，右側「全部顯示 ›」 */
 @Composable
-fun HomePage(vm: BrowserViewModel, modifier: Modifier, onSearch: () -> Unit, onOpen: (String) -> Unit) {
-    val tab = vm.current ?: return
-    val dark = tab.incognito || isSystemInDarkTheme()
-    val content = if (dark) Color.White else Palette.Ink
-    val tone = if (tab.incognito) Tone.Incognito else if (dark) Tone.Dark else Tone.Light
-    val background = vm.settings.collectAsState().value.startBackground
-    val haze = rememberHazeState()
-    Box(modifier) {
-        // 玻璃的取樣來源：自訂背景圖，或搜尋引擎品牌色的柔和色場（讓毛玻璃透出淡淡顏色）；玻璃本身不能放在來源裡
-        Box(Modifier.fillMaxSize().hazeSource(haze)) {
-            if (background != null) {
-                AsyncImage(background, null, Modifier.fillMaxSize().blur(24.dp), contentScale = ContentScale.Crop)
-                Box(Modifier.fillMaxSize().background((if (dark) Color.Black else Color.White).copy(alpha = if (Build.VERSION.SDK_INT >= 31) 0.25f else 0.55f)))
-            } else EngineGlow(vm.settings.collectAsState().value.engine, dark)
+private fun SectionHeader(text: String, content: Color, onShowAll: (() -> Unit)?, top: Dp = 0.dp) {
+    Row(Modifier.fillMaxWidth().padding(top = top, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(text, Modifier.weight(1f), color = content, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        if (onShowAll != null) Row(
+            Modifier.clip(CircleShape).clickable(onClick = onShowAll).padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(t("全部顯示"), color = content.copy(alpha = 0.7f), fontSize = 15.sp)
+            Sym("chevron_right", content.copy(alpha = 0.7f), 18.dp)
         }
-        HomeHeader(vm, haze, tone, tab.incognito, Modifier.fillMaxSize().padding(horizontal = 20.dp).padding(bottom = 40.dp), onSearch, onOpen)
     }
 }
 
 /**
- * 搜尋引擎色場：四團低透明度的放射漸層圍在搜尋框周圍，切換引擎時顏色交叉淡化。
+ * 閱讀列表卡片（Safari）：玻璃底、20dp 圓角，左側縮圖、右側標題（兩行）與網域。
+ * 玻璃畫在主畫面（不開系統模糊視窗）：捲動清單裡的卡片不會變成浮在畫面上的獨立視窗、也不會疊到選單上。
+ * 進場：依序淡入並微微上浮（每張間隔 40ms，減速曲線、不回彈）。
+ */
+@Composable
+private fun ReadingCard(r: ReadingItem, content: Color, tone: Tone, haze: dev.chrisbanes.haze.HazeState, index: Int, modifier: Modifier, onClick: () -> Unit) {
+    val appear = remember { Animatable(if (Motion.reduced) 1f else 0f) }
+    LaunchedEffect(Unit) { delay(index * 40L); appear.animateTo(1f, Motion.glass()) }
+    LiquidGlass(
+        haze, tone, RoundedCornerShape(Dimens.CardRadius),
+        modifier.padding(bottom = 10.dp).fillMaxWidth().height(104.dp)
+            .graphicsLayer { alpha = appear.value; translationY = (1f - appear.value) * 14.dp.toPx() },
+        systemBlur = false, contentAlignment = Alignment.CenterStart, onClick = onClick,
+    ) {
+        Row(Modifier.fillMaxSize().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(84.dp).clip(RoundedCornerShape(12.dp)).background(content.copy(alpha = 0.08f)), Alignment.Center) {
+                if (r.thumbnail != null) AsyncImage(r.thumbnail, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                else Sym("article", content.copy(alpha = 0.4f), 28.dp)
+            }
+            Column(Modifier.padding(start = 12.dp).weight(1f)) {
+                Text(r.title.ifBlank { r.url }, color = content, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 21.sp)
+                Text(Uri.parse(r.url).host?.removePrefix("www.").orEmpty(), Modifier.padding(top = 6.dp), color = content.copy(alpha = 0.55f), fontSize = 13.sp, maxLines = 1)
+            }
+        }
+    }
+}
+
+/** 新分頁（Safari 起始頁）：起始頁鋪上搜尋引擎色場或自訂背景圖；搜尋、輸入網址由網址列負責 */
+@Composable
+fun HomePage(vm: BrowserViewModel, menu: MenuState, modifier: Modifier, barTop: Dp, barBottom: Dp, onOpen: (String) -> Unit) =
+    StartPage(vm, menu, modifier, glow = true, barTop = barTop, barBottom = barBottom, onOpen = onOpen)
+
+/**
+ * 搜尋引擎色場：四團低透明度的放射漸層，切換引擎時顏色交叉淡化。
  * 位置以畫面比例表示（x, y, 半徑佔寬度比例）。
  */
 private val GlowSpots = listOf(Triple(0.08f, 0.34f, 0.52f), Triple(0.96f, 0.38f, 0.5f), Triple(0.1f, 0.70f, 0.5f), Triple(0.92f, 0.72f, 0.52f))
 private val YandexGlow = listOf(0xFFFC3F1D, 0xFFFFCC00, 0xFFFF7A45, 0xFFFFB340).map { Color(it) }
 private val BingGlow = listOf(0xFF0C8EC6, 0xFF37C2D9, 0xFF2F6FE0, 0xFF1BC5B4).map { Color(it) }
+private val GoogleGlow = listOf(0xFF4285F4, 0xFFEA4335, 0xFFFBBC05, 0xFF34A853).map { Color(it) }
 
 @Composable
 private fun EngineGlow(engine: SearchEngine, dark: Boolean) {
     val palette = when (engine) {
-        SearchEngine.Google -> listOf(GoogleColors[0], GoogleColors[1], GoogleColors[2], GoogleColors[4])
+        SearchEngine.Google -> GoogleGlow
         SearchEngine.Bing -> BingGlow
         SearchEngine.Yandex -> YandexGlow
         else -> List(4) { Color(0xFFDE5833) }
@@ -284,115 +337,6 @@ private fun EngineGlow(engine: SearchEngine, dark: Boolean) {
             val center = androidx.compose.ui.geometry.Offset(size.width * x, size.height * y)
             val radius = size.width * r
             drawCircle(Brush.radialGradient(listOf(colors[i].value, Color.Transparent), center, radius), radius, center)
-        }
-    }
-}
-
-/**
- * 進場位移＋淡入：位移在排版階段（offset），透明度只在動畫進行中加 layer，
- * 動畫結束後不留常駐 graphicsLayer（玻璃放在常駐 layer 裡會取樣不到背景）。
- */
-private fun Modifier.rise(a: Animatable<Float, *>): Modifier =
-    offset { IntOffset(0, ((1f - a.value) * 28.dp.toPx()).roundToInt()) }
-        .then(if (a.value < 1f) Modifier.graphicsLayer { alpha = a.value.coerceIn(0f, 1f) } else Modifier)
-
-/** Google 標誌以文字配品牌色繪製（不內嵌官方圖檔）；其他引擎顯示名稱。 */
-/**
- * 官方標誌圖檔（Wikimedia Commons 的 1280px 版本）。
- * Yandex 的「andex」是黑字：深色模式時右側改畫成白色，紅色 Y 保持原色。
- */
-@Composable
-private fun EngineLogo(engine: SearchEngine, content: Color) {
-    val dark = content.luminance() > 0.5f
-    when (engine) {
-        SearchEngine.Google -> Image(painterResource(R.drawable.logo_google), "Google", Modifier.height(68.dp))
-        SearchEngine.Bing -> Image(painterResource(R.drawable.logo_bing), "Microsoft Bing", Modifier.height(42.dp))
-        SearchEngine.Yandex -> {
-            val painter = painterResource(R.drawable.logo_yandex)
-            Canvas(Modifier.height(52.dp).aspectRatio(painter.intrinsicSize.width / painter.intrinsicSize.height)) {
-                // Y 約佔寬度 19%
-                val split = size.width * 0.19f
-                clipRect(right = split) { with(painter) { draw(size) } }
-                clipRect(left = split) { with(painter) { draw(size, colorFilter = if (dark) ColorFilter.tint(Color.White) else null) } }
-            }
-        }
-        else -> Text(engine.label, color = Color(0xFFDE5833), fontSize = 48.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp)
-    }
-}
-
-private val GoogleColors = listOf(0xFF4285F4, 0xFFEA4335, 0xFFFBBC05, 0xFF4285F4, 0xFF34A853, 0xFFEA4335).map { Color(it) }
-
-@Composable
-private fun HomeHeader(vm: BrowserViewModel, haze: dev.chrisbanes.haze.HazeState, tone: Tone, incognito: Boolean, modifier: Modifier, onSearch: () -> Unit, onOpen: (String) -> Unit) {
-    val engine = vm.settings.collectAsState().value.engine
-    val context = LocalContext.current
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        val tab = vm.current
-        if (uri != null && tab != null) vm.searchByImage(tab, uri)
-    }
-    val voice = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
-        r.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let(onOpen)
-    }
-    val content = tone.content
-    // 進場：標誌、搜尋框、按鈕依序以彈簧往上浮現（間隔 70ms）
-    val enter = remember { List(3) { Animatable(if (Motion.reduced) 1f else 0f) } }
-    LaunchedEffect(Unit) { enter.forEachIndexed { i, a -> launch { delay(i * 70L); a.animateTo(1f, Motion.standard()) } } }
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-        // 點標誌在設定裡選定的兩個引擎之間切換（四選二）
-        Row(
-            Modifier.rise(enter[0]).clip(RoundedCornerShape(20.dp))
-                .clickable(onClickLabel = t("切換搜尋引擎")) {
-                    vm.updateSettings { s -> s.copy(engine = s.quickEngines.firstOrNull { it != s.engine } ?: s.quickEngines[0]) }
-                }
-                .semantics(mergeDescendants = true) { contentDescription = t("搜尋引擎：%1\$s，點兩下切換", engine.label) }
-                .padding(horizontal = 12.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // 切換引擎：舊標誌縮小往上淡出、新標誌從下方放大浮上來
-            AnimatedContent(
-                engine,
-                transitionSpec = {
-                    (slideInVertically(Motion.standard()) { it / 3 } + fadeIn(Motion.timed())) togetherWith
-                        (slideOutVertically(Motion.standard()) { -it / 3 } + fadeOut(Motion.timed(Motion.ShortMs))) using
-                        SizeTransform(clip = false)
-                },
-                label = "logo",
-            ) { e ->
-                EngineLogo(e, content)
-            }
-            Sym("swap_horiz", content.copy(alpha = 0.6f), 22.dp, Modifier.padding(start = 6.dp))
-        }
-        // 搜尋框與下方按鈕都是毛玻璃（與底部網址列同一套 LiquidGlass）
-        LiquidGlass(haze, tone, CircleShape, Modifier.padding(top = 28.dp).rise(enter[1]).fillMaxWidth().height(64.dp), onClick = onSearch) {
-          Row(Modifier.fillMaxSize().padding(start = 20.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Sym("search", content.copy(alpha = 0.7f), 24.dp)
-            Text(t("搜尋或輸入網址"), Modifier.padding(start = 14.dp).weight(1f), color = content.copy(alpha = 0.66f), fontSize = 17.sp, maxLines = 1)
-            Box(
-                Modifier.size(52.dp).clip(CircleShape).semantics { contentDescription = t("語音搜尋") }.clickable(role = Role.Button) {
-                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-                        .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_WEB_SEARCH)
-                    if (intent.resolveActivity(context.packageManager) != null) voice.launch(intent) else vm.showToast(t("此裝置不支援語音輸入"))
-                },
-                Alignment.Center,
-            ) { Sym("mic", content.copy(alpha = 0.75f), 24.dp) }
-          }
-        }
-        Row(Modifier.padding(top = 10.dp).rise(enter[2]).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            HomeChip("image_search", t("圖片搜尋"), haze, tone, Modifier.weight(1f)) {
-                picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-            }
-            if (incognito) HomeChip("tab", t("一般分頁"), haze, tone, Modifier.weight(1f)) { vm.newTab(incognito = false) }
-            else HomeChip("visibility_off", t("無痕模式"), haze, tone, Modifier.weight(1f)) { vm.newTab(incognito = true) }
-        }
-    }
-}
-
-@Composable
-private fun HomeChip(icon: String, label: String, haze: dev.chrisbanes.haze.HazeState, tone: Tone, modifier: Modifier, onClick: () -> Unit) {
-    LiquidGlass(haze, tone, CircleShape, modifier.height(48.dp), onClick = onClick) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Sym(icon, tone.content.copy(alpha = 0.8f), 22.dp)
-            Text(label, Modifier.padding(start = 8.dp), color = tone.content, fontSize = 15.sp, fontWeight = FontWeight.Medium)
         }
     }
 }

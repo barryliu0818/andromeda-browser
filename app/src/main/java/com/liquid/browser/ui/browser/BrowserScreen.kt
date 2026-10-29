@@ -513,7 +513,15 @@ fun BrowserScreen(vm: BrowserViewModel) {
                 ) {
                     // 輸入、選單、面板、分頁總覽開著（含關閉動畫）時首頁的玻璃視窗先收起，不會壓在選單、面板、輸入框、總覽上面
                     if (tab.isBlank) androidx.compose.runtime.CompositionLocalProvider(LocalHideBlurWindows provides (focused || overview || menu.spec != null || sheet.content != null || LocalHideBlurWindows.current)) {
-                        HomePage(vm, Modifier.fillMaxSize().background(bg), onSearch = { query = TextFieldValue(); typed = false; focused = true }) { tab.load(it) }
+                        // 起始頁讓出網址列：精簡＝底部一列；底部＝底部整塊；頂部＝頂端網址欄＋底部工具列；橫向＝頂端一列
+                        val nav = with(LocalDensity.current) { WindowInsets.navigationBars.getBottom(this).toDp() }
+                        val (homeTop, homeBottom) = when {
+                            landscape -> (Dimens.Control + Dimens.NavGap * 2) to nav
+                            barLayout == com.liquid.browser.data.BarLayout.Bottom -> 0.dp to ClassicBottomH + nav
+                            barLayout == com.liquid.browser.data.BarLayout.Top -> ClassicTopH to ClassicToolbarH + nav
+                            else -> 0.dp to Dimens.Control + Dimens.NavGap * 2 + nav
+                        }
+                        HomePage(vm, menu, Modifier.fillMaxSize().background(bg), homeTop, homeBottom) { tab.load(it) }
                     }
                     else Column(Modifier.fillMaxSize()) {
                         // 網頁內容從狀態列下方開始（否則頁首會被時間與狀態圖示蓋住）；
