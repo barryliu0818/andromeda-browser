@@ -52,10 +52,15 @@
   }
 
   // 攔截 fetch 與 XHR：只看 timedtext 的回應，其他請求原樣放行
-  var isTrack = function (u) { return typeof u === 'string' && u.indexOf('/api/timedtext') >= 0; };
+  var seen = []; // 看過的字幕請求（除錯用：__lqYt.debug()）
+  var isTrack = function (u) {
+    var hit = typeof u === 'string' && u.indexOf('/api/timedtext') >= 0;
+    if (hit && seen.length < 20) seen.push(u.slice(0, 160));
+    return hit;
+  };
   var origFetch = window.fetch;
   if (origFetch) window.fetch = function (input, init) {
-    var u = typeof input === 'string' ? input : (input && input.url) || '';
+    var u = String((input && input.url) || input || '');
     var p = origFetch.apply(this, arguments);
     if (isTrack(u)) p.then(function (r) { r.clone().text().then(function (b) { onTrack(u, b); }); }).catch(function () {});
     return p;
@@ -90,15 +95,24 @@
   }
   function state() { post({ type: 'yt_state', sent: sent, done: done, cues: cues.length }); }
 
-  // 自動打開字幕：播放器介面（#movie_player）載入字幕模組並選第一條軌
+  // 原始語言的軌：自動產生字幕（asr）的語言就是影片說的語言；有同語言的人工字幕優先，
+  // 沒有 asr 時用預設軌。清單裡其他語言多半是別人的翻譯，不拿來當原文
+  function sourceTrack(list) {
+    var asr = list.filter(function (t) { return t.kind === 'asr'; })[0];
+    var base = function (c) { return (c || '').split('-')[0]; };
+    if (asr) return list.filter(function (t) { return t.kind !== 'asr' && base(t.languageCode) === base(asr.languageCode); })[0] || asr;
+    return list.filter(function (t) { return t.is_default; })[0] || list[0];
+  }
+  // 自動打開字幕：播放器介面（#movie_player）載入字幕模組並切到原始語言的軌
   function enableCaptions() {
     var p = document.getElementById('movie_player');
     try {
       if (p && p.loadModule) {
         p.loadModule('captions');
-        var list = p.getOption && p.getOption('captions', 'tracklist');
+        var list = p.getOption && p.getOption('captions', 'tracklist', { includeAsr: true });
         var cur = p.getOption && p.getOption('captions', 'track');
-        if (list && list.length && (!cur || !cur.languageCode)) p.setOption('captions', 'track', list[0]);
+        var src = list && list.length && sourceTrack(list);
+        if (src && (!cur || cur.vss_id !== src.vss_id)) p.setOption('captions', 'track', src);
         return true;
       }
     } catch (e) {}
@@ -178,5 +192,6 @@
     },
     fail: function (id) { delete pending[id]; done++; state(); },
     active: function () { return on; },
+    debug: function () { return { on: on, key: key, cues: cues.length, sent: sent, done: done, tr: cues.filter(function (c) { return c.tr != null; }).length, seen: seen }; },
   };
 })();

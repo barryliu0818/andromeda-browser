@@ -8,6 +8,9 @@
   // 全螢幕的對象：整個播放器（往外找跟影片同大小的最外層，例如 Plyr 的 .plyr、16:9 比例框），
   // 網站自己的控制列在這一層裡，會跟著進全螢幕；只包影片的內層（.plyr__video-wrapper）不含控制列
   function target(v) {
+    // YouTube：整個播放器（字幕、控制列與 App 的翻譯字幕層都在裡面；只把 <video> 全螢幕會把它們全蓋掉）
+    var yt = v.closest && v.closest('#movie_player, .html5-video-player');
+    if (yt) return yt;
     var a = v.getBoundingClientRect(), best = v;
     for (var p = v.parentElement; p && p !== document.body && p !== document.documentElement; p = p.parentElement) {
       var b = p.getBoundingClientRect();
