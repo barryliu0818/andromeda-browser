@@ -693,10 +693,11 @@ fun BrowserScreen(vm: BrowserViewModel) {
                 // 面板（設定、網站設定…）打開時不畫控制列：面板蓋住整個底部，而系統模糊視窗／原生取樣的玻璃會疊在面板之上
                 // 系統模糊視窗一直保留：輸入中、面板或選單開著等情況改畫在主畫面（inline），切回來不必重建、不會換色；
                 // 選單開著時控制列在遮罩下面，點哪裡都只會關選單，不會同時打開別的東西；
-                // 分頁總覽開著時也畫在主畫面，由總覽蓋住（否則視窗浮在總覽上，底部按鈕之間會露出網址列）
+                // 分頁總覽開著時也畫在主畫面，由總覽蓋住（否則視窗浮在總覽上，底部按鈕之間會露出網址列）；
+                // 網頁影片全螢幕時同理（視窗會浮在全螢幕影片上）
                 if (!PlatformBackdrop && crossBlur) {
                     var glass by remember { mutableStateOf(emptyList<Rect>()) }
-                    SystemBlurWindow(Dimens.Control, regions = { glass.map { it.translate(swipe.value, 0f) } }, inline = !sysBlur || overview || sheet.open || menu.spec != null) { toMain ->
+                    SystemBlurWindow(Dimens.Control, regions = { glass.map { it.translate(swipe.value, 0f) } }, inline = !sysBlur || overview || sheet.open || menu.spec != null || vm.customView != null) { toMain ->
                         // 只有視窗裡那份回報玻璃範圍：主畫面那份（輸入中）收起前最後一幀是動畫中途的尺寸，會蓋掉正確值
                         val inWindow = com.liquid.browser.ui.glass.LocalInBlurWindow.current
                         controlsRow(toMain) { if (inWindow) glass = it }

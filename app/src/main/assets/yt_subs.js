@@ -157,18 +157,21 @@
     if (sig === last) return;
     last = sig;
     var b = ensureBox(); if (!b) return;
-    if (!c) { b.innerHTML = ''; return; }
-    var tr = c.tr != null && c.tr !== c.text ? '<div style="font-size:1.12em">' + esc(c.tr) + '</div>' : '';
-    b.innerHTML = '<span style="display:inline-block;background:rgba(0,0,0,.55);border-radius:8px;padding:4px 10px">' + tr +
-      '<div style="font-weight:500;opacity:.85;font-size:.88em">' + esc(c.text) + '</div></span>';
+    b.textContent = '';
+    if (!c) return;
+    // 用 DOM 節點與 textContent 組（YouTube 要求 Trusted Types，innerHTML 字串會被擋）
+    var pill = el('span', 'display:inline-block;background:rgba(0,0,0,.55);border-radius:8px;padding:4px 10px');
+    if (c.tr != null && c.tr !== c.text) pill.appendChild(el('div', 'font-size:1.12em', String(c.tr)));
+    pill.appendChild(el('div', 'font-weight:500;opacity:.85;font-size:.88em', c.text));
+    b.appendChild(pill);
   }
-  function esc(s) { return s.replace(/[&<>]/g, function (ch) { return ch === '&' ? '&amp;' : ch === '<' ? '&lt;' : '&gt;'; }); }
+  function el(tag, css, text) { var e = document.createElement(tag); e.style.cssText = css; if (text != null) e.textContent = text; return e; }
 
   // 換影片：清掉舊字幕
   var lastVid = videoId();
   setInterval(function () {
     var v = videoId();
-    if (v !== lastVid) { lastVid = v; cues = []; key = ''; pending = {}; sent = 0; done = 0; last = -1; if (box) box.innerHTML = ''; if (on) setTimeout(enableCaptions, 1500); }
+    if (v !== lastVid) { lastVid = v; cues = []; key = ''; pending = {}; sent = 0; done = 0; last = -1; if (box) box.textContent = ''; if (on) setTimeout(enableCaptions, 1500); }
   }, 1000);
 
   window.__lqYt = {

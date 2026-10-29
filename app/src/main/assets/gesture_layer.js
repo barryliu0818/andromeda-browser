@@ -2,6 +2,11 @@
 // 行為與原生端 VideoGestures.kt 一致（數值見 SPEC）。動畫只用 requestAnimationFrame 與 CSS transform／opacity。
 (function () {
   if (window.__liquidGestures) return;
+  // 網站要求 Trusted Types（例如 YouTube 的 Chromium 版）時 innerHTML 只收 TrustedHTML：用本腳本自己的政策包一層
+  // （只用在腳本自己組的固定介面，不放網頁內容；網站本身的保護不受影響）
+  var TT = null;
+  try { if (window.trustedTypes && trustedTypes.createPolicy) TT = trustedTypes.createPolicy('lq-gesture', { createHTML: function (s) { return s; } }); } catch (e) {}
+  function H(s) { return TT ? TT.createHTML(s) : s; }
 
   var SPEC = {
     longPressMs: 400,
@@ -129,7 +134,7 @@
     var pill = document.createElement('div');
     pill.className = 'lq-glass lq-pill';
     var PILL_HTML = '2x <span class="lq-arrows"><span>▶</span><span>▶</span><span>▶</span></span>';
-    pill.innerHTML = PILL_HTML;
+    pill.innerHTML = H(PILL_HTML);
     var scrub = document.createElement('div');
     scrub.className = 'lq-glass lq-scrub';
     var rippleL = document.createElement('div');
@@ -137,7 +142,7 @@
     var rippleR = document.createElement('div');
     rippleR.className = 'lq-ripple r';
     [rippleL, rippleR].forEach(function (r) {
-      r.innerHTML = '<div class="lq-arrows"><span>▶</span><span>▶</span><span>▶</span></div><div class="lq-sec"></div>';
+      r.innerHTML = H('<div class="lq-arrows"><span>▶</span><span>▶</span><span>▶</span></div><div class="lq-sec"></div>');
     });
     var ICON_PLAY = '<svg viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z"/></svg>';
     var ICON_PAUSE = '<svg viewBox="0 0 24 24"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg>';
@@ -155,7 +160,7 @@
     var ICON_CHECK = '<svg viewBox="0 0 24 24"><path d="M9.5 16.2 5.3 12l-1.4 1.4 5.6 5.6L20.1 8.4 18.7 7z"/></svg>';
     var ui = document.createElement('div');
     ui.className = 'lq-ui';
-    ui.innerHTML =
+    ui.innerHTML = H(
       '<div class="lq-top"><div class="lq-round lq-hit lq-close">' + ICON_CLOSE + '</div>' +
       '<div class="lq-rate lq-hit"><div class="lq-speed">1x' + ICON_DOWN + '</div><div class="lq-menu">' +
       SPEEDS.map(function (r) { return '<div class="lq-opt" data-r="' + r + '">' + r + 'x' + ICON_CHECK + '</div>'; }).join('') + '</div></div></div>' +
@@ -163,7 +168,7 @@
       '<div class="lq-bottom"><div class="lq-track lq-hit"><i><u></u><b></b></i></div>' +
       '<div class="lq-row"><div class="lq-btn lq-hit lq-pp"></div><div class="lq-time"></div><div class="lq-btn lq-hit lq-dl">' + ICON_DL + '</div></div></div>' +
       '<div class="lq-confirm"><div class="lq-card"><h4>' + T.title + '</h4><p>' + T.body + '</p>' +
-      '<div class="lq-acts"><div class="no">' + T.no + '</div><div class="yes">' + T.yes + '</div></div></div></div>';
+      '<div class="lq-acts"><div class="no">' + T.no + '</div><div class="yes">' + T.yes + '</div></div></div></div>');
     layer.append(rippleL, rippleR, pill, scrub, ui);
     var $ = function (q) { return ui.querySelector(q); };
     // App 控制層上的按下事件不讓網站播放器收到（它可能在外層攔觸控、切換自己的狀態）
@@ -172,11 +177,11 @@
     });
     var barTimer = null, barTick = null, seeking = false;
     function refreshBar() {
-      $('.lq-pp').innerHTML = video.paused ? ICON_PLAY : ICON_PAUSE;
+      $('.lq-pp').innerHTML = H(video.paused ? ICON_PLAY : ICON_PAUSE);
       $('.lq-dl').style.display = canDownload() ? '' : 'none';
       $('.lq-center').classList.toggle('show', video.paused);
       $('.lq-time').textContent = fmt(video.currentTime) + ' / ' + fmt(video.duration);
-      $('.lq-speed').innerHTML = video.playbackRate + 'x' + ICON_DOWN;
+      $('.lq-speed').innerHTML = H(video.playbackRate + 'x' + ICON_DOWN);
       Array.prototype.forEach.call(ui.querySelectorAll('.lq-opt'), function (o) { o.classList.toggle('sel', +o.dataset.r === video.playbackRate); });
       var d = video.duration || 0;
       if (d && video.buffered && video.buffered.length) $('.lq-track u').style.width = (video.buffered.end(video.buffered.length - 1) / d * 100) + '%';
@@ -208,8 +213,8 @@
       if (/^https?:/i.test(src)) bridge({ type: 'download', src: src, title: document.title });
       else bridge({ type: 'download_best' });
       // 簡短提示（全螢幕時看不到 App 的提示訊息）
-      pill.innerHTML = T.ok; pill.classList.add('on');
-      setTimeout(function () { pill.classList.remove('on'); setTimeout(function () { pill.innerHTML = PILL_HTML; }, 300); }, 1500);
+      pill.innerHTML = H(T.ok); pill.classList.add('on');
+      setTimeout(function () { pill.classList.remove('on'); setTimeout(function () { pill.innerHTML = H(PILL_HTML); }, 300); }, 1500);
       keepBar();
     });
 
@@ -410,7 +415,7 @@
         var secPerPx = Math.min(SPEC.screenWidthSec, dur || SPEC.screenWidthSec) / layer.clientWidth;
         down.target = Math.max(0, Math.min(dur || 1e9, down.start + dx * secPerPx));
         var delta = Math.round(down.target - down.start);
-        scrub.innerHTML = fmt(down.target) + ' / ' + fmt(dur) + '<small>' + (delta >= 0 ? '+' : '−') + Math.abs(delta) + ' 秒</small>';
+        scrub.innerHTML = H(fmt(down.target) + ' / ' + fmt(dur) + '<small>' + (delta >= 0 ? '+' : '−') + Math.abs(delta) + ' 秒</small>');
       }
       if (e.cancelable) e.preventDefault(); // 拖動調整時不要捲動網頁
     }, { capture: true, passive: false });

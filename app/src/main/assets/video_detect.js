@@ -110,6 +110,11 @@
 (function () {
   if (window.__liquidDetect) return;
   window.__liquidDetect = true;
+  // 網站要求 Trusted Types（例如 YouTube 的 Chromium 版）時 innerHTML 只收 TrustedHTML：用本腳本自己的政策包一層
+  // （只用在腳本自己組的固定介面，不放網頁內容；網站本身的保護不受影響）
+  var TT = null;
+  try { if (window.trustedTypes && trustedTypes.createPolicy) TT = trustedTypes.createPolicy('lq-detect', { createHTML: function (s) { return s; } }); } catch (e) {}
+  function H(s) { return TT ? TT.createHTML(s) : s; }
 
   var BTN_CSS =
     '.lq-native{position:absolute;z-index:2147483647;display:flex;align-items:center;gap:6px;padding:7px 12px 7px 10px;' +
@@ -145,7 +150,7 @@
     var b = document.createElement('button');
     b.className = 'lq-native';
     b.__src = src;
-    b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>用原生播放器播放';
+    b.innerHTML = H('<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>用原生播放器播放');
     b.addEventListener('click', function (e) {
       e.preventDefault(); e.stopPropagation();
       var r = v.getBoundingClientRect();
@@ -167,7 +172,7 @@
     var d = document.createElement('button');
     d.className = 'lq-native lq-dl';
     d.setAttribute('aria-label', '下載影片');
-    d.innerHTML = '<svg viewBox="0 0 24 24"><path d="M11 4h2v9.2l3.6-3.6 1.4 1.4-6 6-6-6 1.4-1.4 3.6 3.6zM5 18h14v2H5z"/></svg>';
+    d.innerHTML = H('<svg viewBox="0 0 24 24"><path d="M11 4h2v9.2l3.6-3.6 1.4 1.4-6 6-6-6 1.4-1.4 3.6 3.6zM5 18h14v2H5z"/></svg>');
     d.addEventListener('click', function (e) {
       e.preventDefault(); e.stopPropagation();
       post({ type: 'download', src: b.__src, title: document.title || '' });
