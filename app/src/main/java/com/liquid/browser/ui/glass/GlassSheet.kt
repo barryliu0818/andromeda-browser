@@ -145,13 +145,13 @@ fun GlassSheetHost(state: SheetState, haze: HazeState, tone: Tone) {
         )
         // 三級面板（設定、網站設定、書籤與歷史、下載項目…）用不透明底色，內容長、要好讀
         val sheetBg = if (tone.content.luminance() > 0.5f) com.liquid.browser.core.Palette.Surface2Dark else com.liquid.browser.core.Palette.BgLight
-        // 面板本體：LiquidGlass 在沒有原生 backdrop 的手機上放進系統模糊視窗；其他手機用原本的玻璃
-        LiquidGlass(
-            haze, tone, SheetShape,
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(with(LocalDensity.current) { h.toDp() }),
-            shiftY = { hidden.value * h },
-            placeholderContent = false,
-            contentModifier = Modifier
+        // 面板本體：不透明底色畫在主畫面（不用玻璃）。底色本來就把玻璃整個蓋住，
+        // 用系統模糊視窗只會多開一個視窗、滑動時每幀重算一整片看不見的模糊（實測開面板掉 10 幀、最長一幀 90ms）。
+        // 位移在 graphicsLayer（繪製階段），滑動時不重新排版
+        Box(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(with(LocalDensity.current) { h.toDp() })
+                .graphicsLayer { translationY = hidden.value * h }
+                .clip(SheetShape).background(sheetBg)
                 .nestedScroll(nested)
                 .draggable(
                     rememberDraggableState { d -> scope.launch { hidden.snapTo((hidden.value + d / h).coerceIn(0f, 1f)) } },

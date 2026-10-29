@@ -160,7 +160,11 @@ fun StartPage(
                 Box(Modifier.fillMaxSize().background((if (dark) Color.Black else Color.White).copy(alpha = if (Build.VERSION.SDK_INT >= 31) 0.25f else 0.55f)))
             } else if (glow) EngineGlow(settings.engine, dark)
         }
-        HorizontalPager(pager, Modifier.fillMaxSize().hazeSource(haze), beyondViewportPageCount = 1) { page ->
+        // 剛打開時只組合目前這頁（新分頁第一幀較輕），600ms 後再預先組合其他分段頁：
+        // 之後切換分段時不必在動畫當下組合整頁（實測切換時一半的幀超時、最長一幀 46ms）
+        var ahead by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+        LaunchedEffect(Unit) { delay(600); ahead = Sections.size - 1 }
+        HorizontalPager(pager, Modifier.fillMaxSize().hazeSource(haze), beyondViewportPageCount = ahead) { page ->
             when (page) {
                 0 -> if (tab.incognito) IncognitoNote(content, bottomSpace) else FavoritesPage(vm, menu, content, tone, haze, bottomSpace, pager, onOpen)
                 1 -> BookmarksPage(vm, content, tone, bottomSpace, onOpen)

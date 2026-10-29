@@ -246,9 +246,17 @@ fun TabsOverview(vm: BrowserViewModel, transition: OverviewTransition, onOpen: (
             Modifier.align(Alignment.TopStart).statusBarsPadding()
                 .padding(horizontal = Dimens.EdgeMargin, vertical = Dimens.NavGap).fillMaxWidth().height(Dimens.Control),
         ) {
+            // 欄位一開始就是整列寬（排版只做一次），拉長的動畫只改「露出多少」：
+            // 圓角裁切從搜尋鈕的寬度延伸到整列，在繪製階段做，每幀不重新排版、玻璃不必重算模糊（之前改寬度，幾乎每幀超時）
             LiquidGlass(
                 haze, tone, CircleShape,
-                Modifier.width(androidx.compose.ui.unit.lerp(Dimens.Control, maxWidth, k)).fillMaxHeight(),
+                Modifier.fillMaxWidth().fillMaxHeight().graphicsLayer {
+                    val kk = (reveal / searchH).coerceIn(0f, 1f)
+                    shape = androidx.compose.foundation.shape.GenericShape { s, _ ->
+                        addRoundRect(androidx.compose.ui.geometry.RoundRect(0f, 0f, androidx.compose.ui.util.lerp(s.height, s.width, kk), s.height, androidx.compose.ui.geometry.CornerRadius(s.height / 2)))
+                    }
+                    clip = true
+                },
                 contentAlignment = Alignment.CenterStart,
             ) {
                 Row(Modifier.padding(start = 12.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
