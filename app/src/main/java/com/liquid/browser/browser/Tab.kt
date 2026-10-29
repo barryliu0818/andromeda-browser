@@ -74,6 +74,12 @@ class Tab(
         /** 這個網站是否要阻擋廣告（總開關開著且不在例外清單） */
         fun adBlockFor(pageHost: String): Boolean
 
+        /** 登入表單的帳號／密碼欄被點到（origin 為 null＝離開欄位）；isNew＝註冊表單（可建議高強度密碼） */
+        fun onPasswordField(tab: Tab, origin: String?, isNew: Boolean)
+
+        /** 登入表單送出：詢問要不要儲存這組帳密 */
+        fun onPasswordSubmit(tab: Tab, origin: String, user: String, pass: String)
+
         /** 這個分頁要不要拿掉網址上的追蹤參數（無痕分頁一律要；設定可改成所有瀏覽） */
         fun cleanLinks(tab: Tab): Boolean
 
@@ -221,6 +227,13 @@ class Tab(
             TargetLang.Ja -> l == "ja" || l.startsWith("ja-")
         }
     }
+
+    /** 把帳密填進目前聚焦的登入表單（JSON 字串化，帳密裡的引號、反斜線不會破壞 JS） */
+    fun fillPassword(user: String, pass: String) =
+        webView.evaluateJavascript("window.__lqPw&&window.__lqPw.fill(${JSONObject.quote(user)},${JSONObject.quote(pass)});", null)
+
+    fun fillNewPassword(pass: String) =
+        webView.evaluateJavascript("window.__lqPw&&window.__lqPw.fillNew(${JSONObject.quote(pass)});", null)
 
     fun setYouTubeSubs(on: Boolean) {
         ytSubs = on
@@ -496,9 +509,21 @@ class Tab(
             legacyInject = true
         }
         if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
-            WebViewCompat.addWebMessageListener(webView, "LiquidBridge", setOf("*")) { _, message, _, _, _ ->
+            WebViewCompat.addWebMessageListener(webView, "LiquidBridge", setOf("*")) { _, message, source, mainFrame, _ ->
                 val json = runCatching { JSONObject(message.data ?: return@addWebMessageListener) }.getOrNull() ?: return@addWebMessageListener
-                when (json.optString("type")) {
+                val type = json.optString("type")
+                // 密碼訊息：只收最上層頁面、https、而且跟目前顯示的網站同一個來源（iframe 或別的網站送來的一律不理）
+                if (type.startsWith("pw_")) {
+                    val origin = "${source.scheme}://${source.host}"
+                    if (!mainFrame || source.scheme != "https" || source.host.isNullOrEmpty() || Uri.parse(url).host != source.host) return@addWebMessageListener
+                    when (type) {
+                        "pw_focus" -> listener.onPasswordField(this, origin, json.optString("mode") == "new")
+                        "pw_blur" -> listener.onPasswordField(this, null, false)
+                        "pw_submit" -> json.optString("pass").takeIf { it.isNotEmpty() }?.let { listener.onPasswordSubmit(this, origin, json.optString("user"), it) }
+                    }
+                    return@addWebMessageListener
+                }
+                when (type) {
                     "haptic" -> webView.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                     "nopull" -> { pullArmed = false; pull = 0f }
                     "download_best" -> listener.onDownloadBest(this)

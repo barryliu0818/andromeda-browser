@@ -100,6 +100,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.savedstate.compose)
     implementation(libs.androidx.webkit)
+    testImplementation(kotlin("test-junit"))
 
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.exoplayer.hls)

@@ -115,7 +115,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     private val videoScript: String by lazy {
         val assets = getApplication<Application>().assets
         // yt_subs.js 自己判斷網域，只在 YouTube 上啟用
-        listOf("gesture_layer.js", "video_detect.js", "yt_subs.js").joinToString("\n") { name -> assets.open(name).bufferedReader().use { it.readText() } }
+        listOf("gesture_layer.js", "video_detect.js", "yt_subs.js", "pw_autofill.js").joinToString("\n") { name -> assets.open(name).bufferedReader().use { it.readText() } }
     }
 
     override fun injectedScript() = videoScript
@@ -227,6 +227,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
                 true
             } ?: false
         }
+        PasswordVault.init(app)
         DownloadEngine.init(app)
         AdBlocker.init(app)
         // 「識別為 iPhone」設定改變時套用到所有已開啟的分頁
@@ -568,6 +569,56 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     }
 
     override fun adBlockFor(pageHost: String): Boolean = settings.value.let { it.adBlock && baseDomain(pageHost) !in it.adAllow }
+
+    /** 密碼列（鍵盤上方）：這個網站已存的帳號，或註冊表單時建議高強度密碼 */
+    data class PwOffer(val tab: Tab, val origin: String, val accounts: List<Credential>, val isNew: Boolean)
+    var pwOffer by mutableStateOf<PwOffer?>(null)
+
+    /** 登入送出後詢問要不要儲存的帳密 */
+    data class PwSave(val tab: Tab, val cred: Credential, val update: Boolean)
+    var pwSave by mutableStateOf<PwSave?>(null)
+
+    override fun onPasswordField(tab: Tab, origin: String?, isNew: Boolean) {
+        if (origin == null) { pwOffer = null; return }
+        viewModelScope.launch {
+            val accounts = withContext(Dispatchers.IO) { PasswordVault.forOrigin(origin) }
+            pwOffer = if (accounts.isNotEmpty() || isNew) PwOffer(tab, origin, accounts, isNew) else null
+        }
+    }
+
+    override fun onPasswordSubmit(tab: Tab, origin: String, user: String, pass: String) {
+        // 無痕分頁不留密碼；已經存過一模一樣的就不再問
+        if (tab.incognito) return
+        viewModelScope.launch {
+            val existing = withContext(Dispatchers.IO) { PasswordVault.forOrigin(origin) }.firstOrNull { it.user == user }
+            if (existing?.pass == pass) return@launch
+            pwSave = PwSave(tab, Credential(origin, user, pass), update = existing != null)
+            delay(12_000)
+            if (pwSave?.cred?.pass == pass) pwSave = null
+        }
+    }
+
+    /** 填入已存的密碼：先過指紋／螢幕鎖驗證 */
+    fun usePassword(activity: android.app.Activity, offer: PwOffer, c: Credential) =
+        Auth.request(activity, t("填入 %1\$s 的密碼", c.user.ifBlank { Uri.parse(c.origin).host.orEmpty() }), onFail = { showToast(it) }) {
+            offer.tab.fillPassword(c.user, c.pass)
+            pwOffer = null
+        }
+
+    /** 註冊表單：填入高強度密碼（新密碼與確認密碼一起），登入送出時會再問要不要儲存 */
+    fun useStrongPassword(offer: PwOffer) {
+        offer.tab.fillNewPassword(PasswordVault.strongPassword())
+        pwOffer = null
+        showToast(t("已填入高強度密碼"))
+    }
+
+    fun savePassword(save: PwSave) {
+        pwSave = null
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { PasswordVault.save(save.cred) }
+            showToast(if (save.update) t("已更新密碼") else t("已儲存密碼"))
+        }
+    }
 
     override fun cleanLinks(tab: Tab): Boolean = tab.incognito || settings.value.cleanLinksEverywhere
 

@@ -1,5 +1,6 @@
 package com.liquid.browser.ui.settings
 
+import com.liquid.browser.ui.SymButton
 import com.liquid.browser.browser.Translator
 import com.liquid.browser.data.BarLayout
 import androidx.compose.foundation.layout.Arrangement
@@ -146,8 +147,8 @@ fun SettingsContent(vm: BrowserViewModel, tone: Tone) {
             )
         }
 
-        // 首頁標誌點一下在這兩個之間切換；兩個選成同一個時自動對調
-        item { GroupHeader(t("首頁標誌快速切換"), tone) }
+        // 網址列輸入時，前面的引擎圖示點一下在這兩個之間切換；兩個選成同一個時自動對調
+        item { GroupHeader(t("搜尋引擎快速切換"), tone) }
         items(2, key = { "quick$it" }) { slot ->
             GroupMenuRow(slot, 2, tone, if (slot == 0) t("第一個") else t("第二個"), engines.map { it.label }, engines.indexOf(s.quickEngines[slot])) { i ->
                 vm.updateSettings { st ->
@@ -344,6 +345,46 @@ fun SettingsContent(vm: BrowserViewModel, tone: Tone) {
             ) { i -> vm.updateSettings { it.copy(cleanLinksEverywhere = i == 1) } }
         }
         item { GroupFooter(t("無痕分頁一律阻擋已知追蹤器、封鎖第三方 Cookie、移除網址追蹤參數。個別網站可在「網站設定」關閉廣告阻擋；網站設定也會顯示安全性檢查結果")) }
+
+        // 密碼：要先過指紋／螢幕鎖驗證才展開清單；點一列顯示／隱藏密碼，右側刪除
+        item { GroupHeader(t("密碼"), tone) }
+        item(key = "passwords") {
+            val activity = androidx.activity.compose.LocalActivity.current
+            var creds by remember { mutableStateOf<List<com.liquid.browser.browser.Credential>?>(null) }
+            var reveal by remember { mutableStateOf<com.liquid.browser.browser.Credential?>(null) }
+            val scope = rememberCoroutineScope()
+            val list = creds
+            GroupRow(
+                0, 1 + (list?.size ?: 0), tone, t("已儲存的密碼"),
+                subtitle = if (list == null) t("需要指紋或螢幕鎖驗證") else t("%1\$s 組", list.size),
+                leading = { IconTile("key", Color(0xFF34C759)) },
+                trailing = { Sym(if (list == null) "lock" else "lock_open", tone.content.copy(alpha = 0.4f), 20.dp) },
+                onClick = {
+                    if (list != null) creds = null
+                    else activity?.let { a ->
+                        com.liquid.browser.browser.Auth.request(a, t("查看已儲存的密碼"), onFail = { vm.showToast(it) }) {
+                            scope.launch { creds = withContext(Dispatchers.IO) { com.liquid.browser.browser.PasswordVault.all() } }
+                        }
+                    }
+                },
+            )
+            list?.forEachIndexed { i, c ->
+                GroupRow(
+                    i + 1, list.size + 1, tone, Uri.parse(c.origin).host?.removePrefix("www.").orEmpty(),
+                    subtitle = if (reveal == c) "${c.user}・${c.pass}" else c.user.ifBlank { t("（沒有帳號）") },
+                    trailing = {
+                        SymButton("delete", red, size = 20.dp, label = t("刪除")) {
+                            scope.launch {
+                                withContext(Dispatchers.IO) { com.liquid.browser.browser.PasswordVault.delete(c) }
+                                creds = creds?.minus(c)
+                            }
+                        }
+                    },
+                    onClick = { reveal = if (reveal == c) null else c },
+                )
+            }
+            GroupFooter(t("密碼用這支手機的硬體金鑰加密，只存在這支手機上；填入前一定要驗證身分。無痕分頁不會詢問儲存"))
+        }
 
         item { GroupHeader(t("清除瀏覽資料"), tone) }
         item { GroupPick(0, 4, tone, t("歷史紀錄"), clearHistory, leading = { IconTile("history", Color(0xFF007AFF)) }) { clearHistory = it } }

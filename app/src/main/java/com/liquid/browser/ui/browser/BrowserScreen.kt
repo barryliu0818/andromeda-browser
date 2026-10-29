@@ -823,8 +823,18 @@ fun BrowserScreen(vm: BrowserViewModel) {
 
             // 跳轉 App 提示列（在網址列上方）；提示訊息同時出現時往上讓開
             // 網址列在頂端時底部空出來，提示列與提示訊息貼近底部
-            val above = if (barTop) 16.dp else 72.dp
+            // 依版面讓出底部的網址列／工具列：精簡 72dp；底部版面整塊（108dp）；頂部版面只有工具列（52dp）；橫向（網址列在頂端）16dp
+            val above = when {
+                landscape -> 16.dp
+                barLayout == com.liquid.browser.data.BarLayout.Bottom -> ClassicBottomH + 12.dp
+                barLayout == com.liquid.browser.data.BarLayout.Top -> ClassicToolbarH + 12.dp
+                else -> 72.dp
+            }
             AppPromptBar(vm, haze, menuTone, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = above))
+            // 登入後「要儲存密碼嗎？」：同一個位置（跟跳轉 App 提示不會同時出現：一個在載入新網頁前、一個在登入送出後）
+            SavePasswordBar(vm, haze, menuTone, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = above))
+            // 密碼列：貼在鍵盤正上方
+            PasswordBar(vm, haze, menuTone, menu, Modifier.align(Alignment.BottomCenter).imePadding().padding(start = 16.dp, end = 16.dp, bottom = 8.dp))
 
             // 玻璃提示訊息
             AnimatedVisibility(
