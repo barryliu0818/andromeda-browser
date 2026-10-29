@@ -246,10 +246,11 @@ fun BrowserScreen(vm: BrowserViewModel) {
         if (sheetShown && !tab.isBlank) tab.freezeFrame { if (sheet.content != null) frozen = it } else frozen = null
     }
 
-    // 網址列收合／展開：目標改變時跑一段彈簧動畫（約 0.35 秒、無回彈），可隨時被反方向捲動打斷並從目前位置轉向
+    // 網址列滑出／滑回：滑出用退場曲線（300ms、先慢後快地離開），滑回用進場曲線（450ms、先快後慢地停住）；
+    // collectLatest：反方向捲動會取消進行中的動畫，從目前位置直接轉向，不會等它跑完
     LaunchedEffect(Unit) {
         snapshotFlow { vm.collapsed }.collectLatest { target ->
-            animate(vm.collapse, if (target) 1f else 0f, animationSpec = Motion.collapse()) { v, _ -> vm.collapse = v }
+            animate(vm.collapse, if (target) 1f else 0f, animationSpec = if (target) Motion.exit() else Motion.glass()) { v, _ -> vm.collapse = v }
         }
     }
 
@@ -520,17 +521,17 @@ fun BrowserScreen(vm: BrowserViewModel) {
                         // 用「不論是否隱藏」的高度：影片全螢幕隱藏系統列時，背後網頁不會因高度改變而整頁重排
                         val navBottom = WindowInsets.navigationBarsIgnoringVisibility.getBottom(density)
                         val controlsPx = with(density) { (Dimens.Control + Dimens.NavGap * 2).roundToPx() }
-                        val collapsedPx = with(density) { (Dimens.ControlCollapsed + Dimens.NavGap * 2).roundToPx() }
-                        // 直向收合成小膠囊時，網頁底部的留白跟著縮小（否則網站的底部導覽列下面空一大段）：
-                        // 等收合動畫跑完才改，網頁只重排一次；展開則立即恢復，展開中的網址列不會蓋住網站的底部列
-                        val collapsedNow = vm.collapsed && !barTop
+                        // 往下捲時網址列整個滑出畫面，網頁讓出的空間也收回（否則網站的底部導覽列下面空一大段）：
+                        // 等滑出動畫跑完才改，網頁只重排一次；滑回來則立即恢復，網址列不會蓋住網站的頂部／底部列
+                        val collapsedNow = vm.collapsed
                         LaunchedEffect(tab, landscape, barTop, navBottom, collapsedNow) {
                             if (collapsedNow) delay(360)
+                            val bar = if (collapsedNow) 0 else controlsPx
                             when {
-                                landscape -> tab.setControlsInset(0, controlsPx)
+                                landscape -> tab.setControlsInset(0, bar)
                                 // 直向、網址列在頂端：上方讓出網址列，下方只讓出手勢導覽列
-                                barTop -> tab.setControlsInset(navBottom, controlsPx)
-                                else -> tab.setControlsInset(navBottom + if (collapsedNow) collapsedPx else controlsPx, 0)
+                                barTop -> tab.setControlsInset(navBottom, bar)
+                                else -> tab.setControlsInset(navBottom + bar, 0)
                             }
                         }
                         key(tab.id) {
@@ -562,7 +563,8 @@ fun BrowserScreen(vm: BrowserViewModel) {
 
             // 隱藏控制項：整列滑出畫面，點畫面底部（直向）／頂部（橫向）叫回
             val hide = animateFloatAsState(if (vm.controlsHidden) 1f else 0f, Motion.glass(), label = "hide")
-            val hideShift = with(LocalDensity.current) { 120.dp.toPx() }
+            // 滑出距離要大於網址列＋系統列（頂端時含狀態列）
+            val hideShift = with(LocalDensity.current) { 160.dp.toPx() }
             // 鍵盤：不用 imePadding（鍵盤動畫每一幀都會重新量測、排版整列玻璃），改在擺放階段位移，每幀只移動位置
             val imeInsets = WindowInsets.ime
             val navInsets = WindowInsets.navigationBars
@@ -570,7 +572,10 @@ fun BrowserScreen(vm: BrowserViewModel) {
             else Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = Dimens.NavGap))
                 .offset {
                     val lift = if (barTop) 0 else (imeInsets.getBottom(this) - navInsets.getBottom(this)).coerceAtLeast(0)
-                    IntOffset(0, ((if (barTop) -1f else 1f) * hide.value * hideShift).roundToInt() - lift)
+                    // 隱藏控制項（選單）或往下捲（vm.collapse 0→1）：整列朝網址列所在的那一邊滑出；
+                    // 輸入網址時一律在畫面上
+                    val out = if (focused) hide.value else maxOf(hide.value, vm.collapse)
+                    IntOffset(0, ((if (barTop) -1f else 1f) * out * hideShift).roundToInt() - lift)
                 }
             Column(
                 place.widthIn(max = if (landscape) Dimens.LandscapeMaxWidth else 10_000.dp)

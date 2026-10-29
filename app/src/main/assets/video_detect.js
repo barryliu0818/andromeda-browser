@@ -121,7 +121,7 @@
     'border-radius:999px;color:#fff;font:600 13px/1 system-ui,sans-serif;background:rgba(20,20,22,.32);border:0;' +
     '-webkit-backdrop-filter:blur(20px) saturate(1.4);backdrop-filter:blur(20px) saturate(1.4);' +
     'box-shadow:inset 0 1px 0 rgba(255,255,255,.35),inset 0 -1px 0 rgba(0,0,0,.2),0 6px 20px rgba(0,0,0,.2);' +
-    'transition:transform .25s cubic-bezier(.2,.9,.3,1.3),opacity .2s;-webkit-tap-highlight-color:transparent}' +
+    'transition:transform .25s cubic-bezier(.05,.7,.1,1),opacity .2s;-webkit-tap-highlight-color:transparent}' +
     '.lq-native:active{transform:scale(1.05)}' +
     '.lq-native svg{width:16px;height:16px;fill:#fff}' +
     '.lq-native.lq-dl{padding:7px;gap:0}';

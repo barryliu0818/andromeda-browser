@@ -19,7 +19,15 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import android.os.Build
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -134,7 +142,8 @@ fun Controls(
     val haptic = LocalHapticFeedback.current
     var tabsBounds by remember { mutableStateOf(Rect.Zero) }
     val f = animateFloatAsState(if (focused) 1f else 0f, Motion.glass(), label = "focus")
-    val p = { if (focused) 0f else vm.collapse }
+    // 往下捲時網址列整個滑出畫面（BrowserScreen 位移整列），不再縮成小膠囊：外形固定在展開狀態
+    val p = { 0f }
     val iconAlpha = { (1 - p() * 2.5f).coerceIn(0f, 1f) }
     val circleStyle = rememberGlassStyle(CircleShape, tone.tint)
     val cancelI = remember { MutableInteractionSource() }
@@ -194,7 +203,7 @@ fun Controls(
                         // 翻譯鈕：網頁已經是翻譯目標語言時不出現（YouTube 有字幕翻譯，一律出現；翻譯中／已翻譯也留著，用來切回原文）
                         val target = vm.settings.collectAsState().value.translateTarget
                         val canTranslate = !tab.isBlank && (tab.isYouTube || tab.translated || !tab.alreadyIn(target))
-                        UrlLabel(tab, tone, p, iconAlpha, onPageMenu, onDownloads, if (canTranslate) onTranslate else null) { expand() }
+                        UrlLabel(tab, tone, p, iconAlpha, onPageMenu, onDownloads, onTranslate, canTranslate) { expand() }
                     }
                 }
                 Progress(tab.progress, accent, Modifier.align(Alignment.BottomStart))
@@ -352,7 +361,7 @@ private fun Modifier.pillDrag(enabled: Boolean, g: PillGestures) = pointerInput(
 @Composable
 private fun UrlLabel(
     tab: Tab, tone: Tone, p: () -> Float, iconAlpha: () -> Float, onPageMenu: (Rect) -> Unit, onDownloads: () -> Unit,
-    onTranslate: ((Rect) -> Unit)?, onCollapsedTap: () -> Unit,
+    onTranslate: (Rect) -> Unit, showTranslate: Boolean, onCollapsedTap: () -> Unit,
 ) {
     var menuBounds by remember { mutableStateOf(Rect.Zero) }
     var trBounds by remember { mutableStateOf(Rect.Zero) }
@@ -381,18 +390,27 @@ private fun UrlLabel(
                 overflow = TextOverflow.Ellipsis,
             )
         }
+        // 網址列右側的按鈕出現／消失：從原位放大淡入、網域文字平順讓位（不是突然跳出、把文字擠開）；
+        // 進場 450ms 減速、退場 300ms 加速
+        val enter = fadeIn(Motion.timed()) + scaleIn(Motion.glass(), initialScale = 0.6f) + expandHorizontally(Motion.glass())
+        val exit = fadeOut(Motion.exit()) + scaleOut(Motion.exit(), targetScale = 0.6f) + shrinkHorizontally(Motion.exit())
         // 有下載項目時顯示下載圖示（下載中外圈顯示總進度），點擊進入「下載項目」
-        if (DownloadEngine.tasks.isNotEmpty()) DownloadIndicator(tone, iconAlpha) { if (p() > 0.5f) onCollapsedTap() else onDownloads() }
-        // 翻譯鈕：已翻譯（或 YouTube 字幕翻譯開著）時用強調色，一眼看出這頁正在翻譯
-        if (onTranslate != null) SymButton(
-            "translate", if (tab.translated || tab.ytSubs) accent else tone.content,
-            Modifier.onGloballyPositioned { trBounds = it.boundsInRoot() }, size = 20.dp, alpha = iconAlpha,
-            label = when {
-                tab.isYouTube -> t("翻譯選項")
-                tab.translated -> t("顯示原文")
-                else -> t("翻譯網頁")
-            },
-        ) { if (p() > 0.5f) onCollapsedTap() else onTranslate(trBounds) }
+        AnimatedVisibility(DownloadEngine.tasks.isNotEmpty(), enter = enter, exit = exit) {
+            DownloadIndicator(tone, iconAlpha) { if (p() > 0.5f) onCollapsedTap() else onDownloads() }
+        }
+        // 翻譯鈕：已翻譯（或 YouTube 字幕翻譯開著）時用強調色，一眼看出這頁正在翻譯；顏色漸變而不是瞬間換色
+        AnimatedVisibility(showTranslate, enter = enter, exit = exit) {
+            val trColor by animateColorAsState(if (tab.translated || tab.ytSubs) accent else tone.content, Motion.timed(), label = "tr")
+            SymButton(
+                "translate", trColor,
+                Modifier.onGloballyPositioned { trBounds = it.boundsInRoot() }, size = 20.dp, alpha = iconAlpha,
+                label = when {
+                    tab.isYouTube -> t("翻譯選項")
+                    tab.translated -> t("顯示原文")
+                    else -> t("翻譯網頁")
+                },
+            ) { if (p() > 0.5f) onCollapsedTap() else onTranslate(trBounds) }
+        }
         val loading = tab.progress < 100
         SymButton(
             if (loading) "close" else "refresh", tone.content, size = 20.dp,

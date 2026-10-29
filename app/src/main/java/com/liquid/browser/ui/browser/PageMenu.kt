@@ -106,6 +106,8 @@ fun pageMenu(anchor: Rect, tab: Tab, vm: BrowserViewModel, tone: Tone, context: 
                 vm.showToast(if (top) t("點擊畫面頂部可叫回控制項") else t("點擊畫面底部可叫回控制項"))
             },
             MenuItem(t("回報問題"), "bug_report") { actions.onReport() },
+            // 設定要隨時找得到：不只在分頁總覽的資料庫鈕裡
+            MenuItem(t("設定"), "settings") { actions.onSettings() },
         ),
     )
 

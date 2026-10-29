@@ -26,7 +26,7 @@
     '.lq-glass{position:absolute;color:#fff;font:600 15px/1.2 system-ui,sans-serif;background:rgba(20,20,22,.32);' +
     '-webkit-backdrop-filter:blur(22px) saturate(1.4);backdrop-filter:blur(22px) saturate(1.4);' +
     'box-shadow:inset 0 1px 0 rgba(255,255,255,.35),inset 0 -1px 0 rgba(0,0,0,.2),0 6px 24px rgba(0,0,0,.18);' +
-    'opacity:0;transition:opacity .2s,transform .28s cubic-bezier(.2,.9,.3,1.2);pointer-events:none;white-space:nowrap}' +
+    'opacity:0;transition:opacity .2s,transform .28s cubic-bezier(.05,.7,.1,1);pointer-events:none;white-space:nowrap}' +
     '.lq-pill{left:50%;top:max(16px,11%);padding:7px 16px;border-radius:999px;transform:translate(-50%,-140%)}' +
     '.lq-pill.on{opacity:1;transform:translate(-50%,0)}' +
     '.lq-scrub{left:50%;top:50%;padding:10px 20px;border-radius:18px;text-align:center;transform:translate(-50%,-50%) scale(.85)}' +
@@ -59,7 +59,7 @@
     '.lq-rate.open .lq-speed svg{transform:rotate(180deg)}' +
     '.lq-menu{position:absolute;right:0;top:44px;min-width:128px;padding:6px;border-radius:18px;background:rgba(28,28,30,.55);' +
     '-webkit-backdrop-filter:blur(24px) saturate(1.6);backdrop-filter:blur(24px) saturate(1.6);box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 10px 30px rgba(0,0,0,.35);' +
-    'opacity:0;transform:scale(.9) translateY(-6px);transform-origin:top right;transition:opacity .16s,transform .2s cubic-bezier(.2,.9,.3,1.2);pointer-events:none}' +
+    'opacity:0;transform:scale(.9) translateY(-6px);transform-origin:top right;transition:opacity .16s,transform .2s cubic-bezier(.05,.7,.1,1);pointer-events:none}' +
     '.lq-rate.open .lq-menu{opacity:1;transform:none;pointer-events:auto}' +
     '.lq-opt{height:40px;padding:0 12px;border-radius:12px;display:flex;align-items:center;justify-content:space-between;gap:16px;color:#fff;font:500 15px system-ui,sans-serif}' +
     '.lq-opt:active{background:rgba(255,255,255,.14)}.lq-opt svg{width:18px;height:18px;fill:#0A84FF;visibility:hidden}.lq-opt.sel svg{visibility:visible}' +
@@ -84,15 +84,17 @@
     '.lq-confirm.open{opacity:1;pointer-events:auto}' +
     '.lq-card{width:min(300px,78%);padding:20px 18px 14px;border-radius:24px;text-align:center;color:#fff;background:rgba(28,28,30,.6);' +
     '-webkit-backdrop-filter:blur(28px) saturate(1.6);backdrop-filter:blur(28px) saturate(1.6);box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 16px 40px rgba(0,0,0,.4);' +
-    'transform:scale(.9);transition:transform .22s cubic-bezier(.2,.9,.3,1.2)}' +
+    'transform:scale(.9);transition:transform .22s cubic-bezier(.05,.7,.1,1)}' +
     '.lq-confirm.open .lq-card{transform:none}' +
     '.lq-card h4{margin:0 0 6px;font:600 17px system-ui,sans-serif}.lq-card p{margin:0 0 16px;font:400 14px/1.4 system-ui,sans-serif;opacity:.75}' +
     '.lq-acts{display:flex;gap:10px}.lq-acts div{flex:1;height:44px;border-radius:14px;display:flex;align-items:center;justify-content:center;font:600 15px system-ui,sans-serif}' +
     '.lq-acts .no{background:rgba(255,255,255,.14)}.lq-acts .yes{background:#0A84FF}.lq-acts div:active{opacity:.75}' +
     // 暫停時畫面中央的大播放鈕
     '.lq-center{position:absolute;left:50%;top:50%;width:72px;height:72px;margin:-36px 0 0 -36px;transform:scale(.8);opacity:0;' +
-    'transition:transform .2s cubic-bezier(.2,.9,.3,1.2),opacity .18s}' +
-    '.lq-center.show{transform:scale(1);opacity:1}.lq-center svg{width:34px;height:34px;margin-left:3px}';
+    'transition:transform .2s cubic-bezier(.05,.7,.1,1),opacity .18s}' +
+    '.lq-center.show{transform:scale(1);opacity:1}.lq-center svg{width:34px;height:34px;margin-left:3px}' +
+    // 系統「移除動畫」：拿掉位移與縮放，只留淡入淡出（狀態仍看得出來）
+    '@media (prefers-reduced-motion: reduce){.lq-layer *{transition-property:opacity!important;transform:none!important}}';
 
   function injectStyle(root) {
     if (root.querySelector && root.querySelector('style[data-lq]')) return;
@@ -328,7 +330,7 @@
       var sec = r.querySelector('.lq-sec');
       sec.textContent = (accumulated * SPEC.seekStep) + ' 秒';
       // 秒數累加時輕微彈跳
-      sec.animate && sec.animate([{ transform: 'scale(1.25)' }, { transform: 'scale(1)' }], { duration: 280, easing: 'cubic-bezier(.2,.9,.3,1.3)' });
+      sec.animate && sec.animate([{ transform: 'scale(1.25)' }, { transform: 'scale(1)' }], { duration: 280, easing: 'cubic-bezier(.05,.7,.1,1)' });
       // 從點擊位置擴散的漣漪
       var wave = document.createElement('div');
       wave.className = 'lq-wave';
