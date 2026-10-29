@@ -775,7 +775,8 @@ private const val LIFT_FIXED_JS = """(function(){
       // 網站自己已經用 safe-area-inset-bottom 留了底部空間（例如京東的底部導覽列）：再往上推會多出一段空白
       if (padBottom(el) >= gap - 1) { el.__lqLifted = true; continue; }
       var b = parseFloat(cs.bottom) || 0;
-      el.style.setProperty('bottom', (b + gap) + 'px', 'important');
+      // 用 env()：網址列收合／展開時留白會變，元素跟著上下移動
+      el.style.setProperty('bottom', 'calc(' + b + 'px + env(safe-area-inset-bottom, 0px))', 'important');
       el.__lqLifted = true;
     }
   }

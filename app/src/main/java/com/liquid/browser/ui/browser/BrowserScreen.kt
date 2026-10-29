@@ -510,8 +510,14 @@ fun BrowserScreen(vm: BrowserViewModel) {
                         // 用「不論是否隱藏」的高度：影片全螢幕隱藏系統列時，背後網頁不會因高度改變而整頁重排
                         val navBottom = WindowInsets.navigationBarsIgnoringVisibility.getBottom(density)
                         val controlsPx = with(density) { (Dimens.Control + Dimens.NavGap * 2).roundToPx() }
-                        LaunchedEffect(tab, landscape, navBottom) {
-                            if (landscape) tab.setControlsInset(0, controlsPx) else tab.setControlsInset(navBottom + controlsPx, 0)
+                        val collapsedPx = with(density) { (Dimens.ControlCollapsed + Dimens.NavGap * 2).roundToPx() }
+                        // 直向收合成小膠囊時，網頁底部的留白跟著縮小（否則網站的底部導覽列下面空一大段）：
+                        // 等收合動畫跑完才改，網頁只重排一次；展開則立即恢復，展開中的網址列不會蓋住網站的底部列
+                        val collapsedNow = vm.collapsed && !landscape
+                        LaunchedEffect(tab, landscape, navBottom, collapsedNow) {
+                            if (collapsedNow) delay(360)
+                            if (landscape) tab.setControlsInset(0, controlsPx)
+                            else tab.setControlsInset(navBottom + if (collapsedNow) collapsedPx else controlsPx, 0)
                         }
                         key(tab.id) {
                             Box(Modifier.fillMaxWidth().weight(1f)) {
