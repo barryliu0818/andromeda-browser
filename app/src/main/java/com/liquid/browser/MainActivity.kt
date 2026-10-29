@@ -56,6 +56,7 @@ class MainActivity : ComponentActivity() {
 
     /** JankStats：逐幀監測，掉幀時寫入 logcat（tag: LiquidJank），附帶目前畫面狀態（瀏覽／總覽／播放器） */
     private var jankStats: JankStats? = null
+    private var created = 0L
 
     /** 子母畫面中的播放／暫停按鈕 */
     private val pipReceiver = object : BroadcastReceiver() {
@@ -67,6 +68,8 @@ class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalHazeApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         BugLog.init(this)
+        BugLog.startWatchdog()
+        created = android.os.SystemClock.uptimeMillis()
         CrashLog.install(this)
         // debug 版才開 WebView 遠端除錯（chrome://inspect、adb forward），release 版不開
         if (BuildConfig.DEBUG) android.webkit.WebView.setWebContentsDebuggingEnabled(true)
@@ -90,6 +93,8 @@ class MainActivity : ComponentActivity() {
                 Log.w("LiquidJank", "${ms}ms ${frame.states}")
                 // 超過 3 幀（120Hz 約 25ms）才記進問題紀錄：一兩幀的小抖動太多，會把真正的卡頓淹沒
                 if (ms > 25) BugLog.event("jank", "%.1fms %s %s".format(ms, frame.states.joinToString { "${it.key}=${it.value}" }, vm.current?.domain.orEmpty()))
+                // 一幀超過 150ms（明顯卡一下）：自動回報；剛啟動的前 3 秒（建立畫面）不算
+                if (ms > 150 && android.os.SystemClock.uptimeMillis() - created > 3_000) BugLog.auto("freeze", "一幀 %.0fms %s %s".format(ms, frame.states.joinToString { "${it.key}=${it.value}" }, vm.current?.domain.orEmpty()))
             }
         }
         ContextCompat.registerReceiver(this, pipReceiver, IntentFilter(ACTION_PIP_TOGGLE), ContextCompat.RECEIVER_NOT_EXPORTED)
@@ -185,6 +190,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        BugLog.activity = java.lang.ref.WeakReference(this)
+        // 上次閃退：補一份自動回報（附上閃退的堆疊）
+        BugLog.pendingCrash()?.let { BugLog.auto("crash", "上次閃退：\n$it") }
         refresh.poke()
         // ADPF：RenderThread 在第一幀後才存在，等畫面畫出來再建立效能提示
         window.decorView.post { com.liquid.browser.core.AdpfHint.start(this, display?.supportedModes?.maxOfOrNull { it.refreshRate } ?: 60f) }

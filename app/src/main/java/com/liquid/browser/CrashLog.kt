@@ -23,6 +23,8 @@ object CrashLog {
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, e ->
             BugLog.eventNow("crash", "${thread.name}: ${e.stackTraceToString().lineSequence().take(8).joinToString(" | ")}")
+            // 下次開啟時補一份自動回報（App 日誌、當時的狀態）
+            BugLog.markCrash("${thread.name}\n${e.stackTraceToString()}")
             runCatching {
                 file(app).writeText(
                     buildString {

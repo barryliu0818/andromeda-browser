@@ -1,5 +1,12 @@
 package com.liquid.browser.ui.browser
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.togetherWith
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
+import com.liquid.browser.data.SearchEngine
+import com.liquid.browser.browser.looksLikeUrl
 import com.liquid.browser.core.t
 
 import androidx.compose.foundation.Canvas
@@ -221,7 +228,7 @@ fun Controls(
             ) {
                 // 網域文字與完整網址輸入框之間淡入淡出
                 Crossfade(focused, animationSpec = Motion.timed(Motion.ShortMs), label = "url") { f ->
-                    if (f) UrlInput(query, tone, accent, onQuery, onSubmit)
+                    if (f) UrlInput(query, tone, accent, vm.settings.collectAsState().value.engine, { vm.updateSettings { it.copy(engine = it.engine.next()) } }, onQuery, onSubmit)
                     else {
                         // 翻譯鈕：網頁已經是翻譯目標語言時不出現（YouTube 有字幕翻譯，一律出現；翻譯中／已翻譯也留著，用來切回原文）
                         val target = vm.settings.collectAsState().value.translateTarget
@@ -454,23 +461,78 @@ internal fun UrlLabel(
     }
 }
 
-/** 聚焦的輸入框：完整網址全選、清除鈕、按「前往」送出。 */
+/**
+ * 聚焦的輸入框：完整網址全選、清除鈕、按「前往」送出。
+ * 前面的圖示表示按下「前往」會做什麼：輸入的是網址（www、http、localhost、IP、.com 之類）→ 地球；
+ * 其他 → 目前搜尋引擎的圖示，點一下換下一個引擎（Google → Bing → DuckDuckGo → Yandex）。
+ * 圖示切換：舊的縮小淡出、新的放大淡入（減速曲線、不回彈）；換引擎時輕震一下。
+ */
 @Composable
-internal fun UrlInput(query: TextFieldValue, tone: Tone, accent: Color, onQuery: (TextFieldValue) -> Unit, onSubmit: (String) -> Unit) {
+internal fun UrlInput(
+    query: TextFieldValue, tone: Tone, accent: Color, engine: SearchEngine,
+    onEngine: () -> Unit, onQuery: (TextFieldValue) -> Unit, onSubmit: (String) -> Unit,
+) {
     val fr = remember { FocusRequester() }
     LaunchedEffect(Unit) { fr.requestFocus() }
-    Row(Modifier.fillMaxSize().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-        Sym("search", tone.content.copy(alpha = 0.6f), 20.dp)
-        BasicTextField(
-            query, onQuery,
-            Modifier.weight(1f).padding(horizontal = 8.dp).focusRequester(fr),
-            singleLine = true,
-            textStyle = TextStyle(color = tone.content, fontSize = 16.sp),
-            cursorBrush = SolidColor(accent),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go, autoCorrectEnabled = false),
-            keyboardActions = KeyboardActions(onGo = { onSubmit(query.text) }),
+    val haptic = LocalHapticFeedback.current
+    val isUrl = looksLikeUrl(query.text)
+    Row(Modifier.fillMaxSize().padding(start = 6.dp, end = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier.size(36.dp).clip(CircleShape)
+                .semantics { contentDescription = if (isUrl) t("前往網址") else t("搜尋引擎：%1\$s，點一下切換", engine.label) }
+                .clickable(enabled = !isUrl) { haptic.performHapticFeedback(HapticFeedbackType.SegmentTick); onEngine() },
+            Alignment.Center,
+        ) {
+            AnimatedContent(
+                if (isUrl) null else engine,
+                transitionSpec = {
+                    (fadeIn(Motion.timed(Motion.ShortMs)) + scaleIn(Motion.glass(), initialScale = 0.5f)) togetherWith
+                        (fadeOut(Motion.exit()) + scaleOut(Motion.exit(), targetScale = 0.5f))
+                },
+                label = "engine",
+            ) { e -> if (e == null) Sym("language", tone.content.copy(alpha = 0.7f), 21.dp) else EngineIcon(e, 22.dp) }
+        }
+        Box(Modifier.weight(1f).padding(horizontal = 6.dp), Alignment.CenterStart) {
+            // 空白時提示會用哪個引擎搜尋；換引擎時文字交叉淡化
+            if (query.text.isEmpty()) Crossfade(engine, animationSpec = Motion.timed(), label = "hint") { e ->
+                Text(t("以 %1\$s 搜尋或輸入網址", e.label), color = tone.content.copy(alpha = 0.45f), fontSize = 16.sp, maxLines = 1)
+            }
+            BasicTextField(
+                query, onQuery,
+                Modifier.fillMaxWidth().focusRequester(fr),
+                singleLine = true,
+                textStyle = TextStyle(color = tone.content, fontSize = 16.sp),
+                cursorBrush = SolidColor(accent),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go, autoCorrectEnabled = false),
+                keyboardActions = KeyboardActions(onGo = { onSubmit(query.text) }),
+            )
+        }
+        AnimatedVisibility(query.text.isNotEmpty(), enter = fadeIn(Motion.timed(Motion.ShortMs)) + scaleIn(Motion.glass(), initialScale = 0.6f), exit = fadeOut(Motion.exit()) + scaleOut(Motion.exit(), targetScale = 0.6f)) {
+            SymButton("cancel", tone.content.copy(alpha = 0.5f), size = 18.dp, label = t("清除")) { onQuery(TextFieldValue()) }
+        }
+    }
+}
+
+/** 下一個搜尋引擎（輸入框前的引擎圖示點一下） */
+internal fun SearchEngine.next(): SearchEngine = SearchEngine.entries[(ordinal + 1) % SearchEngine.entries.size]
+
+/**
+ * 搜尋引擎的小圖示：用品牌色畫字母標誌（不連網抓圖、不內嵌官方圖檔）。
+ * Google＝四色 G；Bing＝藍綠 b；DuckDuckGo＝橘底白 D；Yandex＝紅底白 Я。
+ */
+@Composable
+internal fun EngineIcon(engine: SearchEngine, size: Dp) {
+    val fs = with(LocalDensity.current) { (size * 0.78f).toSp() }
+    when (engine) {
+        SearchEngine.Google -> Text(
+            "G", fontSize = fs, fontWeight = FontWeight.Bold, lineHeight = fs,
+            style = TextStyle(brush = Brush.sweepGradient(listOf(Color(0xFFEA4335), Color(0xFFFBBC05), Color(0xFF34A853), Color(0xFF4285F4), Color(0xFFEA4335)))),
         )
-        if (query.text.isNotEmpty()) SymButton("cancel", tone.content.copy(alpha = 0.5f), size = 18.dp) { onQuery(TextFieldValue()) }
+        SearchEngine.Bing -> Text("b", color = Color(0xFF0C8EC6), fontSize = fs, fontWeight = FontWeight.Bold, lineHeight = fs)
+        else -> Box(
+            Modifier.size(size).clip(CircleShape).background(if (engine == SearchEngine.Yandex) Color(0xFFFC3F1D) else Color(0xFFDE5833)),
+            Alignment.Center,
+        ) { Text(if (engine == SearchEngine.Yandex) "Я" else "D", color = Color.White, fontSize = fs * 0.75f, fontWeight = FontWeight.Bold, lineHeight = fs) }
     }
 }
 

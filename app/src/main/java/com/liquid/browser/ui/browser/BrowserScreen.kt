@@ -425,6 +425,34 @@ fun BrowserScreen(vm: BrowserViewModel) {
     val swiping by remember(tab) { derivedStateOf { swipe.value != 0f } }
     val lifting by remember(tab) { derivedStateOf { lift.value != 0f } }
     val backing by remember(tab) { derivedStateOf { back.value != 0f } }
+    // 當下畫面狀態：手動「回報問題」與自動回報（BugLog.auto）共用
+    val screenState: () -> String = {
+        buildString {
+            appendLine("網址：${tab.url}")
+            appendLine("標題：${tab.title}")
+            appendLine("分頁：${vm.visibleTabs().size} 個（${if (tab.incognito) "無痕" else "一般"}）・載入 ${tab.progress}%")
+            appendLine("畫面：${if (tab.isBlank) "首頁" else "網頁"}・版面 ${barLayout}・網址列${if (vm.collapsed) "滑出" else "顯示"}・${if (landscape) "橫向" else "直向"}・${if (dark) "深色" else "淺色"}")
+            appendLine("開著的：${listOfNotNull("分頁總覽".takeIf { overview }, "面板".takeIf { sheet.open }, "選單".takeIf { menu.spec != null }, "輸入網址".takeIf { focused }, "尋找".takeIf { finding }, "影片全螢幕".takeIf { vm.customView != null }).ifEmpty { listOf("無") }.joinToString("、")}")
+            appendLine("系統模糊：${if (PlatformBackdrop) "原生 backdrop" else if (crossBlur) "跨視窗模糊" else "關閉"}・網址列模糊視窗顯示 ${com.liquid.browser.ui.glass.BlurWatch.barShown} 個・桌面版 ${tab.desktop}・文字 ${tab.textZoom}%・翻譯 ${tab.translated}")
+            appendLine("已阻擋：${tab.blockedCount}・偵測到影片：${tab.media.size}")
+        }
+    }
+    SideEffect { com.liquid.browser.BugLog.state = screenState }
+    // 圖層重疊偵測：分頁總覽、面板、選單、影片全螢幕打開後（等進場動畫跑完），網址列的模糊視窗應該都已收起；
+    // 還有顯示的就是浮在它們上面（之前發生過的那種重疊），自動回報
+    val overlay = when {
+        vm.customView != null -> "影片全螢幕"
+        overview -> "分頁總覽"
+        sheet.open -> "面板"
+        menu.spec != null -> "選單"
+        else -> null
+    }
+    LaunchedEffect(overlay) {
+        if (overlay == null) return@LaunchedEffect
+        delay(800)
+        val n = com.liquid.browser.ui.glass.BlurWatch.barShown
+        if (n > 0) com.liquid.browser.BugLog.auto("overlap", "$overlay 開著，網址列的模糊視窗還有 $n 個顯示在畫面上（浮在$overlay 上面）")
+    }
     val pageActions = PageMenuActions(
         onFind = { finding = true },
         onLibrary = {
@@ -440,14 +468,7 @@ fun BrowserScreen(vm: BrowserViewModel) {
             // 等選單退場動畫結束再截圖，截到的是問題畫面本身
             scope.launch {
                 delay(450)
-                val state = buildString {
-                    appendLine("網址：${tab.url}")
-                    appendLine("標題：${tab.title}")
-                    appendLine("分頁：${vm.visibleTabs().size} 個（${if (tab.incognito) "無痕" else "一般"}）・載入 ${tab.progress}%")
-                    appendLine("畫面：${if (tab.isBlank) "首頁" else "網頁"}・網址列${if (vm.collapsed) "收合" else "展開"}・${if (landscape) "橫向" else "直向"}・${if (dark) "深色" else "淺色"}")
-                    appendLine("系統模糊：${if (PlatformBackdrop) "原生 backdrop" else if (crossBlur) "跨視窗模糊" else "關閉"}・桌面版 ${tab.desktop}・文字 ${tab.textZoom}%・翻譯 ${tab.translated}")
-                    appendLine("已阻擋：${tab.blockedCount}・偵測到影片：${tab.media.size}")
-                }
+                val state = screenState()
                 activity?.let { a -> com.liquid.browser.BugLog.report(a, state) { n -> vm.showToast(t("已記錄問題 #%1\$s", n)) } }
             }
         },
@@ -632,7 +653,8 @@ fun BrowserScreen(vm: BrowserViewModel) {
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 val panel = @Composable {
-                    AnimatedVisibility(focused, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
+                    // 搜尋建議：進場 450ms 減速展開、退場 300ms 加速收起（跟其他面板同一套曲線，不用預設彈簧）
+                    AnimatedVisibility(focused, enter = fadeIn(Motion.timed()) + expandVertically(Motion.glass()), exit = fadeOut(Motion.exit()) + shrinkVertically(Motion.exit())) {
                         Suggestions(vm, if (typed) query.text else "", haze, tone) {
                             tab.load(it)
                             cancel()

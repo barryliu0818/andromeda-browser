@@ -918,11 +918,30 @@ private const val META_JS = """(function(){var m=document.querySelector('meta[pr
 /** 使用者輸入轉成網址：有協定直接用、像網域就補 https、其他交給搜尋引擎。 */
 fun toUrl(input: String, searchPrefix: String): String {
     val s = input.trim()
+    val l = s.lowercase()
     return when {
-        s.startsWith("http://") || s.startsWith("https://") || s.startsWith("about:") -> s
-        ' ' !in s && '.' in s -> "https://$s"
+        l.startsWith("http://") || l.startsWith("https://") || l.startsWith("about:") || l.startsWith("file:") -> s
+        // 本機與區網（localhost、IP）多半沒有 HTTPS
+        looksLikeUrl(s) -> if (isLocalAddress(l)) "http://$s" else "https://$s"
         else -> searchPrefix + Uri.encode(s)
     }
+}
+
+private val IpAddress = Regex("^\\d{1,3}(\\.\\d{1,3}){3}(:\\d+)?([/?#].*)?$")
+private val DomainName = Regex("^[\\w-]+(\\.[\\w-]+)*\\.[a-z]{2,}(:\\d+)?([/?#].*)?$")
+
+private fun isLocalAddress(l: String) = l == "localhost" || l.startsWith("localhost:") || l.startsWith("localhost/") || IpAddress.matches(l)
+
+/**
+ * 輸入的是網址（要直接開）還是要搜尋的字：有協定、www. 開頭、localhost、IP、或「名稱.頂級網域」形式
+ * （例如 example.com、news.example.co.uk/path、192.168.1.1:8080）就是網址；有空白、或像 v1.2 這種沒有頂級網域的就是搜尋。
+ * 網址列輸入時前面的圖示依此切換：網址＝地球、搜尋＝搜尋引擎的圖示。
+ */
+fun looksLikeUrl(input: String): Boolean {
+    val l = input.trim().lowercase()
+    if (l.isEmpty() || l.any { it.isWhitespace() }) return false
+    return l.startsWith("http://") || l.startsWith("https://") || l.startsWith("about:") || l.startsWith("file:") ||
+        l.startsWith("www.") || isLocalAddress(l) || DomainName.matches(l)
 }
 
 /** 狀態列顏色：優先 theme-color，沒有就用頁面背景色（body → html），都透明則回傳空字串。 */

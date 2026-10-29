@@ -1,5 +1,6 @@
 package com.liquid.browser.ui.tabs
 
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.ui.draw.drawBehind
@@ -179,7 +180,8 @@ fun TabsOverview(vm: BrowserViewModel, transition: OverviewTransition, onOpen: (
             }
             LazyVerticalGrid(
                 GridCells.Fixed(2),
-                Modifier.fillMaxSize().nestedScroll(pull).offset { IntOffset(0, reveal.roundToInt()) },
+                // 搜尋欄就在頂部那一列（由搜尋鈕拉長），卡片不必跟著往下移
+                Modifier.fillMaxSize().nestedScroll(pull),
                 state = grid,
                 // 上方讓出搜尋與 … 圓鈕那一列
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = top + Dimens.Control + Dimens.NavGap * 2 + 8.dp, bottom = 120.dp),
@@ -216,48 +218,56 @@ fun TabsOverview(vm: BrowserViewModel, transition: OverviewTransition, onOpen: (
             }
         }
 
-        // 搜尋欄
-        if (reveal > 0f) {
-            LiquidGlass(
-                haze, tone, CircleShape,
-                Modifier.padding(top = top + 8.dp, start = 16.dp, end = 16.dp).fillMaxWidth().height(40.dp)
-                    .offset { IntOffset(0, (reveal - searchH).roundToInt()) },
-                contentAlignment = Alignment.CenterStart,
-            ) {
-                Row(Modifier.padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Sym("search", tone.content.copy(alpha = 0.6f), 18.dp)
-                    Box(Modifier.weight(1f).padding(start = 8.dp)) {
-                        if (query.isEmpty()) Text(t("搜尋分頁"), color = tone.content.copy(alpha = 0.5f), fontSize = 15.sp)
-                        BasicTextField(query, { query = it }, singleLine = true, textStyle = TextStyle(color = tone.content, fontSize = 15.sp), cursorBrush = SolidColor(accent))
-                    }
-                    if (searching) Text(
-                        t("取消"),
-                        Modifier.clip(CircleShape).clickable {
-                            query = ""
-                            searching = false
-                            scope.launch { animate(reveal, 0f, animationSpec = Motion.glass()) { v, _ -> reveal = v } }
-                        }.padding(horizontal = 6.dp),
-                        color = tone.content, fontSize = 15.sp,
-                    )
-                }
-            }
-        }
-
-        // 頂部（Safari）：左上搜尋分頁、右上 …（書籤與歷史紀錄、下載項目、設定：App 層級的功能）
+        // 頂部（Safari）：左上搜尋分頁、右上 …（書籤與歷史紀錄、下載項目、設定：App 層級的功能）。
+        // 搜尋時左上的搜尋鈕本身拉長成搜尋欄（從圓鈕的位置與大小開始、往右延伸到整列），右上的 … 隨之淡出：
+        // 同一時間只有一層，不會有搜尋欄蓋在圓鈕上、兩側露出圓鈕邊緣的情況。往下拉也一樣，拉多少欄就長多少。
+        val k = (reveal / searchH).coerceIn(0f, 1f)
         Row(
             Modifier.align(Alignment.TopCenter).statusBarsPadding()
                 .padding(horizontal = Dimens.EdgeMargin, vertical = Dimens.NavGap).fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            LiquidGlass(haze, tone, CircleShape, Modifier.size(Dimens.Control), onClick = {
+            if (k == 0f) LiquidGlass(haze, tone, CircleShape, Modifier.size(Dimens.Control), onClick = {
                 searching = true
                 scope.launch { animate(reveal, searchH, animationSpec = Motion.glass()) { v, _ -> reveal = v } }
             }) {
                 Sym("search", tone.content, 24.dp, Modifier.clearAndSetSemantics { contentDescription = t("搜尋分頁") })
-            }
+            } else Box(Modifier.size(Dimens.Control))
             var libBounds by remember { mutableStateOf(Rect.Zero) }
-            LiquidGlass(haze, tone, CircleShape, Modifier.size(Dimens.Control).onGloballyPositioned { libBounds = it.boundsInRoot() }, onClick = { onLibrary(libBounds) }) {
+            if (k < 1f) LiquidGlass(
+                haze, tone, CircleShape,
+                Modifier.size(Dimens.Control).graphicsLayer { alpha = 1f - k }.onGloballyPositioned { libBounds = it.boundsInRoot() },
+                onClick = { if (k < 0.5f) onLibrary(libBounds) },
+            ) {
                 Sym("more_horiz", tone.content, 24.dp, Modifier.clearAndSetSemantics { contentDescription = t("更多") })
+            }
+        }
+        if (k > 0f) androidx.compose.foundation.layout.BoxWithConstraints(
+            Modifier.align(Alignment.TopStart).statusBarsPadding()
+                .padding(horizontal = Dimens.EdgeMargin, vertical = Dimens.NavGap).fillMaxWidth().height(Dimens.Control),
+        ) {
+            LiquidGlass(
+                haze, tone, CircleShape,
+                Modifier.width(androidx.compose.ui.unit.lerp(Dimens.Control, maxWidth, k)).fillMaxHeight(),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                Row(Modifier.padding(start = 12.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Sym("search", tone.content.copy(alpha = 0.6f + 0.4f * (1f - k)), 24.dp)
+                    // 欄位拉長到一半以上才淡入文字與「取消」（還很窄時不擠在一起）
+                    Box(Modifier.weight(1f).padding(start = 8.dp).graphicsLayer { alpha = ((k - 0.5f) * 2f).coerceIn(0f, 1f) }) {
+                        if (query.isEmpty()) Text(t("搜尋分頁"), color = tone.content.copy(alpha = 0.5f), fontSize = 16.sp, maxLines = 1)
+                        BasicTextField(query, { query = it }, singleLine = true, textStyle = TextStyle(color = tone.content, fontSize = 16.sp), cursorBrush = SolidColor(accent))
+                    }
+                    if (searching && k > 0.5f) Text(
+                        t("取消"),
+                        Modifier.graphicsLayer { alpha = ((k - 0.5f) * 2f).coerceIn(0f, 1f) }.clip(CircleShape).clickable {
+                            query = ""
+                            searching = false
+                            scope.launch { animate(reveal, 0f, animationSpec = Motion.exit()) { v, _ -> reveal = v } }
+                        }.padding(horizontal = 8.dp, vertical = 6.dp),
+                        color = tone.content, fontSize = 16.sp, maxLines = 1,
+                    )
+                }
             }
         }
 

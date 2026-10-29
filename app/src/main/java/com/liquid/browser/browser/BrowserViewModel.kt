@@ -518,6 +518,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
 
     /** 渲染程序沒了：WebView 已不能再用，在原位置換成新分頁並重新載入同一個網址 */
     override fun onRendererGone(tab: Tab) {
+        com.liquid.browser.BugLog.auto("renderer", "網頁渲染程序被結束或崩潰：${tab.url}")
         viewModelScope.launch {
             val url = tab.url
             val wasCurrent = tab == current

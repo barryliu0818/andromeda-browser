@@ -89,7 +89,7 @@ fun SystemBlurWindow(
     val latest by rememberUpdatedState(content)
     val latestRegions by rememberUpdatedState(regions)
     val blurPx = with(LocalDensity.current) { blurRadius.roundToPx() }
-    val wins = remember { List(MaxRegions) { BlurDialog(context, parent) } }
+    val wins = remember { List(MaxRegions) { BlurDialog(context, parent).apply { bar = true } } }
     DisposableEffect(wins) {
         wins.forEach { win ->
             win.decor.setViewTreeLifecycleOwner(lifecycle)
@@ -101,7 +101,7 @@ fun SystemBlurWindow(
         }
         place.push = { if (place.size != IntSize.Zero) { val rs = latestRegions(); wins.forEachIndexed { i, w -> w.update(place.origin, rs.getOrNull(i) ?: Rect.Zero, place.size, blurPx, hidden = latestInline) } } }
         place.push()
-        onDispose { place.push = {}; wins.forEach { it.dismiss() } }
+        onDispose { place.push = {}; wins.forEach { it.park(); it.dismiss() } }
     }
     // 玻璃範圍（含左右滑切換分頁的位移）改變時更新視窗：在協程裡觀察，不觸發重組
     androidx.compose.runtime.LaunchedEffect(wins) { androidx.compose.runtime.snapshotFlow { latestRegions() to latestInline }.collect { place.push() } }
@@ -154,7 +154,24 @@ internal object BlurPool {
     fun clear() { idle.forEach { it.dismiss() }; idle.clear() }
 }
 
+/**
+ * 自動問題紀錄用：網址列的系統模糊視窗目前有幾個真的顯示在畫面上（可見、而且不是收起來的 1×1）。
+ * 分頁總覽、面板、選單、影片全螢幕開著時這個數應該是 0；不是 0 就是視窗浮在它們上面（圖層重疊）。
+ */
+object BlurWatch {
+    @Volatile var barShown = 0
+        internal set
+}
+
 internal class BlurDialog(context: Context, parent: CompositionContext) : Dialog(context, R.style.BlurWindow) {
+    /** 網址列（SystemBlurWindow）的視窗；BlurPool 的單塊玻璃（選單、面板）不算 */
+    var bar = false
+    private var counted = false
+    private fun count(shown: Boolean) {
+        if (!bar || shown == counted) return
+        counted = shown
+        BlurWatch.barShown += if (shown) 1 else -1
+    }
     val view = ComposeView(context).apply { setParentCompositionContext(parent) }
     val decor get() = window!!.decorView
     private val bg = GradientDrawable().apply { setColor(0) }
@@ -204,6 +221,7 @@ internal class BlurDialog(context: Context, parent: CompositionContext) : Dialog
 
     /** 收起待用：內容 GONE、縮成 1×1、清掉位移 */
     fun park() {
+        count(false)
         val w = window ?: return
         w.decorView.visibility = android.view.View.GONE
         w.decorView.translationY = 0f
@@ -220,6 +238,7 @@ internal class BlurDialog(context: Context, parent: CompositionContext) : Dialog
         val w = window ?: return
         // 被總覽、播放器蓋住：隱藏視窗，連模糊一起消失
         w.decorView.visibility = if (hidden) android.view.View.GONE else android.view.View.VISIBLE
+        count(!hidden && r.width >= 1f && r.height >= 1f)
         if (hidden) return
         // 這塊玻璃目前不存在（例如收合時的分頁鈕）或還不知道範圍：縮成畫面外 1×1，但內容照常排版——
         // 玻璃範圍是視窗裡的內容排版時回報的，視窗 GONE 就永遠收不到範圍、一直不出現（開網頁後網址列消失）
