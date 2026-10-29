@@ -1,5 +1,6 @@
 package com.liquid.browser.ui.tabs
 
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -221,54 +222,59 @@ fun TabsOverview(vm: BrowserViewModel, transition: OverviewTransition, onOpen: (
         // 頂部（Safari）：左上搜尋分頁、右上 …（書籤與歷史紀錄、下載項目、設定：App 層級的功能）。
         // 搜尋時左上的搜尋鈕本身拉長成搜尋欄（從圓鈕的位置與大小開始、往右延伸到整列），右上的 … 隨之淡出：
         // 同一時間只有一層，不會有搜尋欄蓋在圓鈕上、兩側露出圓鈕邊緣的情況。往下拉也一樣，拉多少欄就長多少。
-        val k = (reveal / searchH).coerceIn(0f, 1f)
+        // 動畫中的 reveal 只在繪製階段（graphicsLayer）讀；組合階段只看這三個「門檻」，
+        // 跨過門檻那一幀才重組（之前直接讀 reveal，拉長期間整個總覽每幀重組 3～5ms，幾乎每幀超時）
+        val searchOpen by remember { derivedStateOf { reveal > 0f } }
+        val searchFull by remember { derivedStateOf { reveal >= searchH } }
+        val searchText by remember { derivedStateOf { reveal > searchH * 0.5f } }
+        val k = { (reveal / searchH).coerceIn(0f, 1f) }
         Row(
             Modifier.align(Alignment.TopCenter).statusBarsPadding()
                 .padding(horizontal = Dimens.EdgeMargin, vertical = Dimens.NavGap).fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            if (k == 0f) LiquidGlass(haze, tone, CircleShape, Modifier.size(Dimens.Control), onClick = {
+            if (!searchOpen) LiquidGlass(haze, tone, CircleShape, Modifier.size(Dimens.Control), onClick = {
                 searching = true
                 scope.launch { animate(reveal, searchH, animationSpec = Motion.glass()) { v, _ -> reveal = v } }
             }) {
                 Sym("search", tone.content, 24.dp, Modifier.clearAndSetSemantics { contentDescription = t("搜尋分頁") })
             } else Box(Modifier.size(Dimens.Control))
             var libBounds by remember { mutableStateOf(Rect.Zero) }
-            if (k < 1f) LiquidGlass(
+            if (!searchFull) LiquidGlass(
                 haze, tone, CircleShape,
-                Modifier.size(Dimens.Control).graphicsLayer { alpha = 1f - k }.onGloballyPositioned { libBounds = it.boundsInRoot() },
-                onClick = { if (k < 0.5f) onLibrary(libBounds) },
+                Modifier.size(Dimens.Control).graphicsLayer { alpha = 1f - k() }.onGloballyPositioned { libBounds = it.boundsInRoot() },
+                onClick = { if (!searchText) onLibrary(libBounds) },
             ) {
                 Sym("more_horiz", tone.content, 24.dp, Modifier.clearAndSetSemantics { contentDescription = t("更多") })
             }
         }
-        if (k > 0f) androidx.compose.foundation.layout.BoxWithConstraints(
+        if (searchOpen) Box(
             Modifier.align(Alignment.TopStart).statusBarsPadding()
                 .padding(horizontal = Dimens.EdgeMargin, vertical = Dimens.NavGap).fillMaxWidth().height(Dimens.Control),
         ) {
-            // 欄位一開始就是整列寬（排版只做一次），拉長的動畫只改「露出多少」：
-            // 圓角裁切從搜尋鈕的寬度延伸到整列，在繪製階段做，每幀不重新排版、玻璃不必重算模糊（之前改寬度，幾乎每幀超時）
+            // 欄位一開始就是整列寬（排版只做一次），拉長的動畫只改「露出多少」：圓角裁切從搜尋鈕的寬度延伸到整列，
+            // 在繪製階段做；不開系統模糊視窗（拉長期間不必搬動視窗）
             LiquidGlass(
                 haze, tone, CircleShape,
                 Modifier.fillMaxWidth().fillMaxHeight().graphicsLayer {
-                    val kk = (reveal / searchH).coerceIn(0f, 1f)
+                    val kk = k()
                     shape = androidx.compose.foundation.shape.GenericShape { s, _ ->
                         addRoundRect(androidx.compose.ui.geometry.RoundRect(0f, 0f, androidx.compose.ui.util.lerp(s.height, s.width, kk), s.height, androidx.compose.ui.geometry.CornerRadius(s.height / 2)))
                     }
                     clip = true
                 },
-                contentAlignment = Alignment.CenterStart,
+                contentAlignment = Alignment.CenterStart, systemBlur = false,
             ) {
                 Row(Modifier.padding(start = 12.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Sym("search", tone.content.copy(alpha = 0.6f + 0.4f * (1f - k)), 24.dp)
+                    Sym("search", tone.content.copy(alpha = 0.6f), 24.dp)
                     // 欄位拉長到一半以上才淡入文字與「取消」（還很窄時不擠在一起）
-                    Box(Modifier.weight(1f).padding(start = 8.dp).graphicsLayer { alpha = ((k - 0.5f) * 2f).coerceIn(0f, 1f) }) {
+                    Box(Modifier.weight(1f).padding(start = 8.dp).graphicsLayer { alpha = ((k() - 0.5f) * 2f).coerceIn(0f, 1f) }) {
                         if (query.isEmpty()) Text(t("搜尋分頁"), color = tone.content.copy(alpha = 0.5f), fontSize = 16.sp, maxLines = 1)
                         BasicTextField(query, { query = it }, singleLine = true, textStyle = TextStyle(color = tone.content, fontSize = 16.sp), cursorBrush = SolidColor(accent))
                     }
-                    if (searching && k > 0.5f) Text(
+                    if (searching && searchText) Text(
                         t("取消"),
-                        Modifier.graphicsLayer { alpha = ((k - 0.5f) * 2f).coerceIn(0f, 1f) }.clip(CircleShape).clickable {
+                        Modifier.graphicsLayer { alpha = ((k() - 0.5f) * 2f).coerceIn(0f, 1f) }.clip(CircleShape).clickable {
                             query = ""
                             searching = false
                             scope.launch { animate(reveal, 0f, animationSpec = Motion.exit()) { v, _ -> reveal = v } }
@@ -278,7 +284,6 @@ fun TabsOverview(vm: BrowserViewModel, transition: OverviewTransition, onOpen: (
                 }
             }
         }
-
         // 底部（Safari）：＋ / 無痕｜N 個分頁 分段切換 / 藍色 ✓ 完成
         Row(
             Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
