@@ -473,7 +473,7 @@ internal fun UrlInput(
     onEngine: () -> Unit, onQuery: (TextFieldValue) -> Unit, onSubmit: (String) -> Unit,
 ) {
     val fr = remember { FocusRequester() }
-    LaunchedEffect(Unit) { fr.requestFocus() }
+    FocusAndShowKeyboard(fr)
     val haptic = LocalHapticFeedback.current
     val isUrl = looksLikeUrl(query.text)
     Row(Modifier.fillMaxSize().padding(start = 6.dp, end = 10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -510,6 +510,22 @@ internal fun UrlInput(
         AnimatedVisibility(query.text.isNotEmpty(), enter = fadeIn(Motion.timed(Motion.ShortMs)) + scaleIn(Motion.glass(), initialScale = 0.6f), exit = fadeOut(Motion.exit()) + scaleOut(Motion.exit(), targetScale = 0.6f)) {
             SymButton("cancel", tone.content.copy(alpha = 0.5f), size = 18.dp, label = t("清除")) { onQuery(TextFieldValue()) }
         }
+    }
+}
+
+/**
+ * 輸入框一出現就聚焦並叫出鍵盤。只 requestFocus 不夠：網頁（WebView）剛剛持有焦點或鍵盤時，
+ * 系統常常不會自動跳出鍵盤，所以聚焦後明確 show() 一次，下一幀再補一次（輸入法還在切換連線時第一次會被忽略）。
+ */
+@Composable
+internal fun FocusAndShowKeyboard(fr: FocusRequester) {
+    val kb = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    LaunchedEffect(Unit) {
+        fr.requestFocus()
+        kb?.show()
+        androidx.compose.runtime.withFrameNanos { }
+        kotlinx.coroutines.delay(120)
+        kb?.show()
     }
 }
 

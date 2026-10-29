@@ -193,7 +193,7 @@ fun share(context: Context, url: String, title: String = "") {
 fun FindBar(tab: Tab, haze: HazeState, tone: Tone, onDone: () -> Unit) {
     var q by remember { mutableStateOf("") }
     val fr = remember { FocusRequester() }
-    LaunchedEffect(Unit) { fr.requestFocus() }
+    FocusAndShowKeyboard(fr)
     val accent = accent
     Row(Modifier.fillMaxWidth().height(Dimens.Control), horizontalArrangement = Arrangement.spacedBy(Dimens.ControlGap), verticalAlignment = Alignment.CenterVertically) {
         LiquidGlass(haze, tone, CircleShape, Modifier.weight(1f).fillMaxSize(), contentAlignment = Alignment.CenterStart) {
