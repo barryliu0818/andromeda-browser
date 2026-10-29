@@ -102,6 +102,13 @@
     (root.head || root).appendChild(s);
   }
 
+  // 影片實際畫面的範圍（<video> 預設 object-fit: contain：畫面置中、其餘是黑邊）
+  function picture(v, r) {
+    if (!v.videoWidth || !v.videoHeight) return r;
+    var s = Math.min(r.width / v.videoWidth, r.height / v.videoHeight), w = v.videoWidth * s, h = v.videoHeight * s;
+    return { left: r.left + (r.width - w) / 2, top: r.top + (r.height - h) / 2, width: w, height: h };
+  }
+
   function fmt(sec) {
     sec = Math.max(0, Math.floor(sec || 0));
     var h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
@@ -273,6 +280,8 @@
       var h = host();
       if (layer.parentNode !== h) h.appendChild(layer);
       var r = video.getBoundingClientRect();
+      // 全螢幕時貼齊實際畫面（直向時 <video> 撐滿整個螢幕、畫面在中間；照元素放的話 2x 提示會頂到鏡頭）
+      if (h !== document.body) r = picture(video, r);
       var base = h === document.body ? { left: -window.scrollX, top: -window.scrollY } : h.getBoundingClientRect();
       layer.style.left = (r.left - base.left) + 'px';
       layer.style.top = (r.top - base.top) + 'px';
@@ -286,6 +295,22 @@
     window.addEventListener('scroll', place, { passive: true });
     window.addEventListener('resize', place);
     document.addEventListener('fullscreenchange', function () { setTimeout(place, 50); });
+    // 全螢幕元素是整個播放器（含網站自己的控制列）時，網站的控制列會和 App 的控制層疊在一起：
+    // 全螢幕期間把通往影片那條路以外的兄弟元素都藏起來（App 的字幕層等標了 data-lq-keep 的留著），離開時還原
+    var chrome = [];
+    document.addEventListener('fullscreenchange', function () {
+      chrome.forEach(function (p) { p[0].style.visibility = p[1]; });
+      chrome = [];
+      var fs = document.fullscreenElement;
+      if (!fs || fs === video || !fs.contains(video)) return;
+      for (var n = video; n && n !== fs; n = n.parentElement) {
+        Array.prototype.forEach.call(n.parentElement.children, function (s) {
+          if (s === n || s === layer || s.hasAttribute('data-lq-keep') || /^(STYLE|SCRIPT|LINK)$/.test(s.tagName)) return;
+          chrome.push([s, s.style.visibility]);
+          s.style.setProperty('visibility', 'hidden', 'important');
+        });
+      }
+    });
     setInterval(place, 1000); // 版面被頁面腳本改動時的保險
 
     var pendingTap = null, lastTapAt = 0, lastZone = 0, accumulating = false, accumulated = 0, rippleTimer = null;

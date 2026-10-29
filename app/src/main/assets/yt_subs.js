@@ -129,12 +129,29 @@
     if (box) box.remove();
     box = document.createElement('div');
     box.className = 'notranslate';
-    box.style.cssText = 'position:absolute;left:4%;right:4%;bottom:12%;z-index:60;text-align:center;pointer-events:none;' +
+    // data-lq-keep：全螢幕時手勢層會藏起播放器裡的其他元素（網站自己的控制列），字幕層要留著
+    box.setAttribute('data-lq-keep', '');
+    // z-index 壓過播放器自己的覆蓋層（全螢幕時 YouTube 的控制層會整片蓋住 z-index 小的元素），但在手勢層之下
+    box.style.cssText = 'position:absolute;left:4%;right:4%;bottom:12%;z-index:2147483640;text-align:center;pointer-events:none;' +
       'font:600 16px/1.35 -apple-system,system-ui,sans-serif;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.9),0 0 2px #000';
     if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
     host.appendChild(box);
     return box;
   }
+  // 依實際畫面擺放：直向全螢幕時 <video> 撐滿整個螢幕、畫面在中間，字幕要貼在畫面底部而不是螢幕底部；
+  // 字級跟著畫面高度（橫向全螢幕放大，直向小視窗維持 16px）
+  function placeBox(b, v) {
+    var hr = b.parentElement.getBoundingClientRect(), vr = v.getBoundingClientRect();
+    var ph = vr.height, top = vr.top;
+    if (v.videoWidth && v.videoHeight) {
+      var s = Math.min(vr.width / v.videoWidth, vr.height / v.videoHeight);
+      ph = v.videoHeight * s; top = vr.top + (vr.height - ph) / 2;
+    }
+    b.style.bottom = Math.max(0, hr.bottom - (top + ph) + ph * 0.08) + 'px';
+    b.style.fontSize = Math.round(Math.max(16, Math.min(26, ph * 0.045))) + 'px';
+  }
+  document.addEventListener('fullscreenchange', function () { last = -1; setTimeout(function () { last = -1; }, 300); });
+  window.addEventListener('resize', function () { last = -1; });
   var hideNative = null;
   function setNativeHidden(h) {
     if (h && !hideNative) {
@@ -159,6 +176,7 @@
     var b = ensureBox(); if (!b) return;
     b.textContent = '';
     if (!c) return;
+    placeBox(b, v);
     // 用 DOM 節點與 textContent 組（YouTube 要求 Trusted Types，innerHTML 字串會被擋）
     var pill = el('span', 'display:inline-block;background:rgba(0,0,0,.55);border-radius:8px;padding:4px 10px');
     if (c.tr != null && c.tr !== c.text) pill.appendChild(el('div', 'font-size:1.12em', String(c.tr)));
