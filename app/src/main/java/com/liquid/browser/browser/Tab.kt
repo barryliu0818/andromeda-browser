@@ -100,6 +100,10 @@ class Tab(
         fun injectedScript(): String
         /** Android 17 區域網路權限不足而無法載入（ERR_LOCAL_NETWORK_PERMISSION_MISSING） */
         fun onLocalNetworkNeeded(tab: Tab)
+        /** YouTube 字幕翻譯：一批字幕要翻譯（回填 __lqYt.apply） */
+        fun onSubtitleBatch(tab: Tab, id: Int, texts: List<String>)
+        /** 開了字幕翻譯，但這部影片沒有字幕可用 */
+        fun onNoCaptions(tab: Tab)
         /** App 專用連結（taobao://、intent://…）；gesture＝使用者點擊觸發 */
         fun onAppLink(tab: Tab, url: String, gesture: Boolean)
     }
@@ -173,6 +177,16 @@ class Tab(
     fun resetTranslate() {
         translated = false
         webView.evaluateJavascript("window.__lqTr&&window.__lqTr.reset();", null)
+    }
+
+    /** YouTube 字幕翻譯是否開著（只在 YouTube 頁面有意義；換頁不關，換影片時腳本自己抓新字幕） */
+    var ytSubs by androidx.compose.runtime.mutableStateOf(false)
+        private set
+    val isYouTube get() = pageHost == "youtube.com" || pageHost.endsWith(".youtube.com")
+
+    fun setYouTubeSubs(on: Boolean) {
+        ytSubs = on
+        webView.evaluateJavascript(if (on) "window.__lqYt&&window.__lqYt.start();" else "window.__lqYt&&window.__lqYt.stop();", null)
     }
 
     fun showOriginal() {
@@ -307,6 +321,8 @@ class Tab(
                 trDone = 0
                 url = u
                 loadFailed = false
+                // 整頁重新載入：頁面上的字幕翻譯腳本狀態已不在
+                ytSubs = false
                 themeColor = null
                 readerOn = false
                 findMatches = 0
@@ -427,6 +443,11 @@ class Tab(
                         listener.onTranslateBatch(this, json.optInt("id"), List(arr.length()) { arr.optString(it) })
                     }
                     "tr_state" -> { trSent = json.optInt("sent"); trDone = json.optInt("done") }
+                    "yt_tr" -> {
+                        val arr = json.optJSONArray("texts") ?: return@addWebMessageListener
+                        listener.onSubtitleBatch(this, json.optInt("id"), List(arr.length()) { arr.optString(it) })
+                    }
+                    "yt_state" -> if (json.optBoolean("noCaptions")) listener.onNoCaptions(this)
                     "download" -> json.optString("src").takeIf { it.startsWith("http") }?.let { listener.onVideoDownload(this, it, json.optString("title").ifBlank { title }) }
                     "native" -> {
                         val src = json.optString("src").takeIf { it.startsWith("http") } ?: return@addWebMessageListener

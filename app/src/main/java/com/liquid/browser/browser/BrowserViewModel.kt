@@ -114,7 +114,8 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     /** 注入網頁的影片偵測＋手勢層腳本（assets），第一次使用時讀取並快取 */
     private val videoScript: String by lazy {
         val assets = getApplication<Application>().assets
-        listOf("gesture_layer.js", "video_detect.js").joinToString("\n") { name -> assets.open(name).bufferedReader().use { it.readText() } }
+        // yt_subs.js 自己判斷網域，只在 YouTube 上啟用
+        listOf("gesture_layer.js", "video_detect.js", "yt_subs.js").joinToString("\n") { name -> assets.open(name).bufferedReader().use { it.readText() } }
     }
 
     override fun injectedScript() = videoScript
@@ -620,10 +621,43 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
 
     override fun onTranslateBatch(tab: Tab, id: Int, texts: List<String>) {
         viewModelScope.launch {
+            translateTexts(tab, texts).onSuccess { tr ->
+                tab.webView.evaluateJavascript("window.__lqTr&&window.__lqTr.apply($id, ${org.json.JSONArray(tr)});", null)
+            }.onFailure { e ->
+                tab.webView.evaluateJavascript("window.__lqTr&&window.__lqTr.fail($id);", null)
+                showToast(t("翻譯失敗：%1\$s", e.message))
+            }
+        }
+    }
+
+    override fun onSubtitleBatch(tab: Tab, id: Int, texts: List<String>) {
+        viewModelScope.launch {
+            translateTexts(tab, texts).onSuccess { tr ->
+                tab.webView.evaluateJavascript("window.__lqYt&&window.__lqYt.apply($id, ${org.json.JSONArray(tr)});", null)
+            }.onFailure { e ->
+                tab.webView.evaluateJavascript("window.__lqYt&&window.__lqYt.fail($id);", null)
+                com.liquid.browser.BugLog.event("translate", "字幕翻譯失敗：${e.message}")
+                if (tab == current) showToast(t("翻譯失敗：%1\$s", e.message))
+            }
+        }
+    }
+
+    override fun onNoCaptions(tab: Tab) {
+        if (tab == current) showToast(t("這部影片沒有字幕，或請先按播放器的 CC 打開字幕"))
+    }
+
+    fun toggleYouTubeSubs(tab: Tab) {
+        val on = !tab.ytSubs
+        tab.setYouTubeSubs(on)
+        if (on) showToast(t("字幕翻譯已開啟"))
+    }
+
+    /** 翻譯一批文字：先查快取，AI 引擎失敗時這個分頁改用免費引擎（只提示一次） */
+    private suspend fun translateTexts(tab: Tab, texts: List<String>): Result<List<String>> {
             val s = settings.value
             val engine = if (aiFailedFor == tab) TranslateEngine.Tencent else activeTranslateEngine()
             val target = s.translateTarget
-            val result = runCatching {
+            return runCatching {
                 // 先查快取；只把沒翻過、且不重複的文字送出去
                 val cached = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { translationCache.get(target.google, texts) }
                 val todo = texts.filter { it !in cached }.distinct()
@@ -643,13 +677,6 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
                 }
                 texts.map { cached[it] ?: fresh[it] ?: it }
             }
-            result.onSuccess { tr ->
-                tab.webView.evaluateJavascript("window.__lqTr&&window.__lqTr.apply($id, ${org.json.JSONArray(tr)});", null)
-            }.onFailure { e ->
-                tab.webView.evaluateJavascript("window.__lqTr&&window.__lqTr.fail($id);", null)
-                showToast(t("翻譯失敗：%1\$s", e.message))
-            }
-        }
     }
 
     /** 嗅探到的影片：用分頁標題當檔名 */

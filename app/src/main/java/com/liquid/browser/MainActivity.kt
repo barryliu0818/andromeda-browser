@@ -68,6 +68,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         BugLog.init(this)
         CrashLog.install(this)
+        // debug 版才開 WebView 遠端除錯（chrome://inspect、adb forward），release 版不開
+        if (BuildConfig.DEBUG) android.webkit.WebView.setWebContentsDebuggingEnabled(true)
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         CrashLog.showIfAny(this)

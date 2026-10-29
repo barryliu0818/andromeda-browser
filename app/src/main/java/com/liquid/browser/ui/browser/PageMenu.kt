@@ -104,6 +104,9 @@ fun pageMenu(anchor: Rect, tab: Tab, vm: BrowserViewModel, tone: Tone, context: 
         MenuItem(t("網站設定"), "tune") { actions.onSiteSettings() },
         // 直接翻成設定裡選好的語言（設定 → 網頁翻譯 → 翻譯成）
         MenuItem(if (tab.translated) t("顯示原文") else t("翻譯網頁"), "translate") { vm.toggleTranslate(tab) },
+    ) + (if (tab.isYouTube) listOf(
+        MenuItem(if (tab.ytSubs) t("關閉字幕翻譯") else t("翻譯字幕"), "subtitles") { vm.toggleYouTubeSubs(tab) },
+    ) else emptyList()) + listOf(
         MenuItem(t("設定"), "settings") { actions.onSettings() },
         MenuItem(t("回報問題"), "bug_report") { actions.onReport() },
     ),
