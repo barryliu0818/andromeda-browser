@@ -95,8 +95,9 @@ fun SystemBlurWindow(
             win.decor.setViewTreeLifecycleOwner(lifecycle)
             win.decor.setViewTreeSavedStateRegistryOwner(saved)
             // 每個視窗都畫完整的內容，只露出自己那一塊（觸控也只收自己那一塊）
-            // 畫在主畫面時視窗內不組合內容（避免兩份輸入框同時要求焦點）
-            win.view.setContent { win.Content { toMain -> if (!latestInline) latest(toMain) } }
+            // 視窗內的內容一直保留組合（呼叫端在視窗裡一律畫「非輸入中」的樣子，不會有兩份輸入框搶焦點）：
+            // 之前畫在主畫面時把視窗內容拆掉，離開輸入時三個視窗要同時重新組合整條網址列，那一幀 40ms 以上
+            win.view.setContent { win.Content { toMain -> latest(toMain) } }
             win.show()
         }
         place.push = { if (place.size != IntSize.Zero) { val rs = latestRegions(); wins.forEachIndexed { i, w -> w.update(place.origin, rs.getOrNull(i) ?: Rect.Zero, place.size, blurPx, hidden = latestInline) } } }

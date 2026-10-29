@@ -735,8 +735,9 @@ fun BrowserScreen(vm: BrowserViewModel) {
                         // 用 offset（排版階段位移）而非 graphicsLayer：原生 backdrop 玻璃放在祖先 layer 裡會取樣不到網頁
                         Box(Modifier.offset { IntOffset(swipe.value.roundToInt(), 0) }) {
                             if (finding) FindBar(tab, haze, menuTone) { finding = false }
+                            // 系統模糊視窗裡的那份一律是「非輸入中」：輸入時畫在主畫面（視窗隱藏），兩份不會同時有輸入框
                             else Controls(
-                                vm, tab, haze, tone, focused, query,
+                                vm, tab, haze, tone, focused && !com.liquid.browser.ui.glass.LocalInBlurWindow.current, query,
                                 onQuery = { if (it.text != query.text) typed = true; query = it },
                                 onFocus = {
                                     // 網頁先放掉焦點與輸入連線，網址列的輸入框才接得上輸入法
