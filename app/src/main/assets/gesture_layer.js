@@ -340,6 +340,8 @@
     // 雙擊（暫停／左右快轉）、長按（2 倍速）、左右拖動（調進度）、上下拖動（亮度／音量）由這裡處理
     // 回傳 true＝這一下被當成雙擊／連擊處理了（呼叫端會吃掉這次點擊，網站收不到，不會觸發它自己的雙擊切換全螢幕）
     function onTap(x, at) {
+      // 倍速選單開著：點選單外的地方只關選單（這一下不算單擊／雙擊）
+      if (rate.classList.contains('open')) { rate.classList.remove('open'); keepBar(); lastTapAt = 0; return true; }
       var zone = zoneOf(x), handled = false;
       if (accumulating && zone !== 0 && zone === lastZone && at - lastTapAt < SPEC.accumulateMs) {
         showSeek(zone, x, layer.clientHeight / 2); handled = true;
