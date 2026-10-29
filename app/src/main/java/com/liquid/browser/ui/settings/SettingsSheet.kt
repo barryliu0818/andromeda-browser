@@ -1,5 +1,6 @@
 package com.liquid.browser.ui.settings
 
+import com.liquid.browser.data.BarLayout
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.border
 import androidx.compose.ui.semantics.semantics
@@ -245,15 +246,15 @@ fun SettingsContent(vm: BrowserViewModel, tone: Tone) {
                 Modifier.fillMaxWidth().groupItem(0, 3, tone).padding(vertical = 16.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
-                listOf(false to t("底部"), true to t("頂部")).forEach { (top, label) ->
-                    val on = s.addressBarTop == top
+                listOf(BarLayout.Compact to t("精簡"), BarLayout.Bottom to t("底部"), BarLayout.Top to t("頂部")).forEach { (layout, label) ->
+                    val on = s.barLayout == layout
                     Column(
-                        Modifier.clip(RoundedCornerShape(16.dp)).clickable { vm.updateSettings { it.copy(addressBarTop = top) } }
-                            .padding(horizontal = 20.dp, vertical = 6.dp)
+                        Modifier.clip(RoundedCornerShape(16.dp)).clickable { vm.updateSettings { it.copy(barLayout = layout) } }
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
                             .semantics(mergeDescendants = true) { selected = on },
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        LayoutPhone(top, if (on) accent else tone.content.copy(alpha = 0.35f))
+                        LayoutPhone(layout, if (on) accent else tone.content.copy(alpha = 0.35f))
                         Text(label, Modifier.padding(top = 8.dp), color = tone.content, fontSize = 15.sp)
                         Box(
                             Modifier.padding(top = 6.dp).size(22.dp).clip(CircleShape)
@@ -610,16 +611,25 @@ private fun TextButton(text: String, color: Color, onClick: () -> Unit) =
     Text(text, Modifier.clip(CircleShape).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp), color = color, fontSize = 15.sp)
 
 /** 把選取的圖片複製到 App 私有資料夾（相簿授權只是暫時的），回傳 file:// 路徑。 */
-/** 網址列位置的示意圖：手機外框，網址列畫成底部或頂部的一條（選中時用強調色） */
+/**
+ * 網址列版面的示意圖（Safari 設定頁那三支手機）：
+ * 精簡＝底部一條短膠囊；底部＝底部一整塊粗條；頂部＝頂端一條＋底部一條細工具列。選中時用強調色。
+ */
 @Composable
-private fun LayoutPhone(top: Boolean, color: Color) {
+private fun LayoutPhone(layout: BarLayout, color: Color) {
     androidx.compose.foundation.Canvas(Modifier.size(44.dp, 84.dp)) {
         val st = 2.dp.toPx()
         drawRoundRect(color, topLeft = Offset(st / 2, st / 2), size = Size(size.width - st, size.height - st), cornerRadius = CornerRadius(10.dp.toPx()), style = Stroke(st))
-        val barW = size.width * 0.62f
-        val barH = 5.dp.toPx()
-        val y = if (top) 9.dp.toPx() else size.height - 9.dp.toPx() - barH
-        drawRoundRect(color, topLeft = Offset((size.width - barW) / 2, y), size = Size(barW, barH), cornerRadius = CornerRadius(barH / 2))
+        val inset = 6.dp.toPx()
+        fun bar(y: Float, w: Float, h: Float) = drawRoundRect(color, topLeft = Offset((size.width - w) / 2, y), size = Size(w, h), cornerRadius = CornerRadius(minOf(h / 2, 3.dp.toPx())))
+        when (layout) {
+            BarLayout.Compact -> bar(size.height - 9.dp.toPx() - 5.dp.toPx(), size.width * 0.62f, 5.dp.toPx())
+            BarLayout.Bottom -> bar(size.height - inset - 13.dp.toPx(), size.width - inset * 2, 13.dp.toPx())
+            BarLayout.Top -> {
+                bar(inset + 2.dp.toPx(), size.width - inset * 2, 6.dp.toPx())
+                bar(size.height - inset - 5.dp.toPx(), size.width - inset * 2, 5.dp.toPx())
+            }
+        }
     }
 }
 

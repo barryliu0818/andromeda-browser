@@ -101,7 +101,7 @@ fun pageMenu(anchor: Rect, tab: Tab, vm: BrowserViewModel, tone: Tone, context: 
             MenuItem(t("網站設定"), "tune") { actions.onSiteSettings() },
             MenuItem(t("隱藏控制項"), "unfold_less") {
                 vm.controlsHidden = true
-                val top = vm.settings.value.addressBarTop ||
+                val top = vm.settings.value.barLayout == com.liquid.browser.data.BarLayout.Top ||
                     context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
                 vm.showToast(if (top) t("點擊畫面頂部可叫回控制項") else t("點擊畫面底部可叫回控制項"))
             },

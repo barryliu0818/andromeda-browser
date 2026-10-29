@@ -302,7 +302,7 @@ private fun DownloadIndicator(tone: Tone, alpha: () -> Float, onClick: () -> Uni
  * 數字用 TextMeasurer 量測後畫在方框正中央（Text 元件的字型上下留白會讓數字偏移）。
  */
 @Composable
-private fun TabsIcon(count: Int, color: Color, modifier: Modifier = Modifier) {
+internal fun TabsIcon(count: Int, color: Color, modifier: Modifier = Modifier) {
     val measurer = rememberTextMeasurer()
     fun label(n: Int) = if (n > 99) "∞" else "$n"
     fun style(l: String) = TextStyle(color = color, fontSize = if (l.length > 1) 10.sp else 11.sp, fontWeight = FontWeight.SemiBold)
@@ -387,7 +387,7 @@ private fun Modifier.pillDrag(enabled: Boolean, g: PillGestures) = pointerInput(
 
 /** 未聚焦的網址列：左 aA 頁面選單、中網域、右重新整理／停止。收合時兩側淡出、網域縮小。 */
 @Composable
-private fun UrlLabel(
+internal fun UrlLabel(
     tab: Tab, tone: Tone, p: () -> Float, iconAlpha: () -> Float, onPageMenu: (Rect) -> Unit, onDownloads: () -> Unit,
     onTranslate: (Rect) -> Unit, showTranslate: Boolean, onCollapsedTap: () -> Unit,
 ) {
@@ -456,7 +456,7 @@ private fun UrlLabel(
 
 /** 聚焦的輸入框：完整網址全選、清除鈕、按「前往」送出。 */
 @Composable
-private fun UrlInput(query: TextFieldValue, tone: Tone, accent: Color, onQuery: (TextFieldValue) -> Unit, onSubmit: (String) -> Unit) {
+internal fun UrlInput(query: TextFieldValue, tone: Tone, accent: Color, onQuery: (TextFieldValue) -> Unit, onSubmit: (String) -> Unit) {
     val fr = remember { FocusRequester() }
     LaunchedEffect(Unit) { fr.requestFocus() }
     Row(Modifier.fillMaxSize().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -476,7 +476,7 @@ private fun UrlInput(query: TextFieldValue, tone: Tone, accent: Color, onQuery: 
 
 /** 沿膠囊底緣的藍色進度線：平滑增長，完成時淡出。只改 graphicsLayer，不重新排版。 */
 @Composable
-private fun Progress(progress: Int, accent: Color, modifier: Modifier) {
+internal fun Progress(progress: Int, accent: Color, modifier: Modifier) {
     val loading = progress < 100
     val alpha by animateFloatAsState(if (loading) 1f else 0f, tween(if (loading) 0 else 400), label = "pa")
     val frac by animateFloatAsState(progress / 100f, Motion.standard(), label = "pf")

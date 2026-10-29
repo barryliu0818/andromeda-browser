@@ -168,8 +168,11 @@ fun BrowserScreen(vm: BrowserViewModel) {
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-    // 網址列在頂端：橫向一律如此，直向看設定
-    val barTop = landscape || settings.addressBarTop
+    // 網址列版面（Safari）：精簡＝底部浮動一列；底部＝底部整塊（網址欄＋工具列）；頂部＝網址欄在頂端、工具列在底部。
+    // 橫向一律用精簡版面、放在頂端
+    val barLayout = if (landscape) com.liquid.browser.data.BarLayout.Compact else settings.barLayout
+    val classic = barLayout != com.liquid.browser.data.BarLayout.Compact
+    val barTop = landscape || barLayout == com.liquid.browser.data.BarLayout.Top
     var focused by remember { mutableStateOf(false) }
     var overview by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf(TextFieldValue()) }
@@ -521,6 +524,9 @@ fun BrowserScreen(vm: BrowserViewModel) {
                         // 用「不論是否隱藏」的高度：影片全螢幕隱藏系統列時，背後網頁不會因高度改變而整頁重排
                         val navBottom = WindowInsets.navigationBarsIgnoringVisibility.getBottom(density)
                         val controlsPx = with(density) { (Dimens.Control + Dimens.NavGap * 2).roundToPx() }
+                        val classicBottomPx = with(density) { ClassicBottomH.roundToPx() }
+                        val classicToolbarPx = with(density) { ClassicToolbarH.roundToPx() }
+                        val classicTopPx = with(density) { ClassicTopH.roundToPx() }
                         // 往下捲時網址列整個滑出畫面，網頁讓出的空間也收回（否則網站的底部導覽列下面空一大段）：
                         // 等滑出動畫跑完才改，網頁只重排一次；滑回來則立即恢復，網址列不會蓋住網站的頂部／底部列
                         val collapsedNow = vm.collapsed
@@ -529,7 +535,11 @@ fun BrowserScreen(vm: BrowserViewModel) {
                             val bar = if (collapsedNow) 0 else controlsPx
                             when {
                                 landscape -> tab.setControlsInset(0, bar)
-                                // 直向（網址列在頂端時網頁整個往下移一條網址列的高度，底部被推出畫面的那段一樣要讓出）
+                                // 底部版面：讓出整塊（網址欄＋工具列）
+                                barLayout == com.liquid.browser.data.BarLayout.Bottom -> tab.setControlsInset(navBottom + if (collapsedNow) 0 else classicBottomPx, 0)
+                                // 頂部版面：網頁往下移一條網址欄，底部讓出工具列＋被推出畫面的那段
+                                barLayout == com.liquid.browser.data.BarLayout.Top -> tab.setControlsInset(navBottom + if (collapsedNow) 0 else classicToolbarPx + classicTopPx, 0)
+                                // 精簡（網址列在頂端時網頁整個往下移一條網址列的高度，底部被推出畫面的那段一樣要讓出）
                                 else -> tab.setControlsInset(navBottom + bar, 0)
                             }
                         }
@@ -537,7 +547,7 @@ fun BrowserScreen(vm: BrowserViewModel) {
                             // 直向、網址列在頂端（Chrome 的作法）：網頁往下移一條網址列的高度，網頁頂端不被蓋住；
                             // 網址列往上滑走時網頁跟著同步往上（在排版階段位移，不重組、不改 WebView 大小）
                             val pushDown = barTop && !landscape
-                            Box(Modifier.fillMaxWidth().weight(1f).offset { IntOffset(0, if (pushDown) ((1f - vm.collapse) * controlsPx).roundToInt() else 0) }) {
+                            Box(Modifier.fillMaxWidth().weight(1f).offset { IntOffset(0, if (pushDown) ((1f - vm.collapse) * (if (classic) classicTopPx else controlsPx)).roundToInt() else 0) }) {
                                 AndroidView(
                                     factory = { tab.webView.also { (it.parent as? ViewGroup)?.removeView(it) } },
                                     modifier = Modifier.fillMaxSize(),
@@ -563,6 +573,33 @@ fun BrowserScreen(vm: BrowserViewModel) {
                 )
             }
 
+            // 長按返回：列出上一頁歷史（最近的在最上面），點一下直接跳回那一頁；anchor 為主畫面座標
+            val backHistory: (Rect) -> Unit = { anchor ->
+                val list = tab.webView.copyBackForwardList()
+                val items = (1..minOf(list.currentIndex, 8)).mapNotNull { n ->
+                    list.getItemAtIndex(list.currentIndex - n)?.let { h ->
+                        MenuItem(h.title?.takeIf { it.isNotBlank() } ?: h.url, "arrow_back") { tab.webView.goBackOrForward(-n) }
+                    }
+                }
+                if (items.isNotEmpty()) menu.show(MenuSpec(anchor, items))
+            }
+            // 長按分頁鈕：新增／關閉分頁
+            val tabsMenu: (Rect) -> Unit = { anchor ->
+                val n = vm.visibleTabs().size
+                menu.show(
+                    MenuSpec(
+                        anchor,
+                        listOf(
+                            MenuItem(t("新增分頁"), "add") { vm.newTab(incognito = false) },
+                            MenuItem(t("新增無痕分頁"), "visibility_off") { vm.newTab(incognito = true) },
+                            MenuItem(t("關閉此分頁"), "close") { vm.close(tab) },
+                            MenuItem(t("關閉所有分頁（%1\$s 個）", n), "close", destructive = true) { vm.closeAll() },
+                        ),
+                    ),
+                )
+            }
+            val goBack = { if (tab.canGoBack) tab.webView.goBack() else if (!tab.isBlank) vm.newTab(incognito = tab.incognito) }
+
             // 隱藏控制項：整列滑出畫面，點畫面底部（直向）／頂部（橫向）叫回
             val hide = animateFloatAsState(if (vm.controlsHidden) 1f else 0f, Motion.glass(), label = "hide")
             // 滑出距離要大於網址列＋系統列（頂端時含狀態列）
@@ -570,8 +607,9 @@ fun BrowserScreen(vm: BrowserViewModel) {
             // 鍵盤：不用 imePadding（鍵盤動畫每一幀都會重新量測、排版整列玻璃），改在擺放階段位移，每幀只移動位置
             val imeInsets = WindowInsets.ime
             val navInsets = WindowInsets.navigationBars
-            val place = (if (barTop) Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = Dimens.NavGap)
-            else Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = Dimens.NavGap))
+            // 底部／頂部版面：浮動膠囊與搜尋建議擺在玻璃條外面（底部條上方／頂部條下方）
+            val place = (if (barTop) Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = if (classic) ClassicTopH else Dimens.NavGap)
+            else Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = if (classic) ClassicBottomH + Dimens.NavGap else Dimens.NavGap))
                 .offset {
                     val lift = if (barTop) 0 else (imeInsets.getBottom(this) - navInsets.getBottom(this)).coerceAtLeast(0)
                     // 隱藏控制項（選單）或往下捲（vm.collapse 0→1）：整列朝網址列所在的那一邊滑出；
@@ -679,32 +717,10 @@ fun BrowserScreen(vm: BrowserViewModel) {
                                 // 一般網頁直接翻譯／切回原文；YouTube 跳出「翻譯網頁／翻譯字幕」
                                 onTranslate = { anchor -> if (tab.isYouTube) menu.show(translateMenu(toMain(anchor), tab, vm)) else vm.toggleTranslate(tab) },
                                 // 返回鈕：有上一頁就回上一頁；網頁的第一頁回到起始頁（跟系統返回手勢一樣，原網頁留在分頁裡）
-                                onBack = { if (tab.canGoBack) tab.webView.goBack() else if (!tab.isBlank) vm.newTab(incognito = tab.incognito) },
+                                onBack = goBack,
                                 backEnabled = tab.canGoBack || !tab.isBlank,
-                                // 長按返回：列出上一頁歷史（最近的在最上面），點一下直接跳回那一頁
-                                onBackLongPress = { anchor ->
-                                    val list = tab.webView.copyBackForwardList()
-                                    val items = (1..minOf(list.currentIndex, 8)).mapNotNull { n ->
-                                        list.getItemAtIndex(list.currentIndex - n)?.let { h ->
-                                            MenuItem(h.title?.takeIf { it.isNotBlank() } ?: h.url, "arrow_back") { tab.webView.goBackOrForward(-n) }
-                                        }
-                                    }
-                                    if (items.isNotEmpty()) menu.show(MenuSpec(toMain(anchor), items))
-                                },
-                                onTabsLongPress = { anchor ->
-                                    val n = vm.visibleTabs().size
-                                    menu.show(
-                                        MenuSpec(
-                                            toMain(anchor),
-                                            listOf(
-                                                MenuItem(t("新增分頁"), "add") { vm.newTab(incognito = false) },
-                                                MenuItem(t("新增無痕分頁"), "visibility_off") { vm.newTab(incognito = true) },
-                                                MenuItem(t("關閉此分頁"), "close") { vm.close(tab) },
-                                                MenuItem(t("關閉所有分頁（%1\$s 個）", n), "close", destructive = true) { vm.closeAll() },
-                                            ),
-                                        ),
-                                    )
-                                },
+                                onBackLongPress = { backHistory(toMain(it)) },
+                                onTabsLongPress = { tabsMenu(toMain(it)) },
                                 pillGestures = gestures,
                                 alignTop = barTop,
                                 onGlassBounds = onGlass,
@@ -721,7 +737,9 @@ fun BrowserScreen(vm: BrowserViewModel) {
                 // 選單開著時控制列在遮罩下面，點哪裡都只會關選單，不會同時打開別的東西；
                 // 分頁總覽開著時也畫在主畫面，由總覽蓋住（否則視窗浮在總覽上，底部按鈕之間會露出網址列）；
                 // 網頁影片全螢幕時同理（視窗會浮在全螢幕影片上）
-                if (!PlatformBackdrop && crossBlur) {
+                // 底部／頂部版面：控制項在下面另外畫（ClassicBottomBar 等）；這裡只剩「在頁面上尋找」
+                if (classic) { if (finding) FindBar(tab, haze, menuTone) { finding = false } }
+                else if (!PlatformBackdrop && crossBlur) {
                     var glass by remember { mutableStateOf(emptyList<Rect>()) }
                     SystemBlurWindow(Dimens.Control, regions = { glass.map { it.translate(swipe.value, 0f) } }, inline = !sysBlur || overview || sheet.open || menu.spec != null || vm.customView != null) { toMain ->
                         // 只有視窗裡那份回報玻璃範圍：主畫面那份（輸入中）收起前最後一幀是動畫中途的尺寸，會蓋掉正確值
@@ -730,6 +748,40 @@ fun BrowserScreen(vm: BrowserViewModel) {
                     }
                 } else controlsRow({ it }, null)
                 if (barTop) panel()
+            }
+
+            // Safari「底部」「頂部」版面：一整塊玻璃，往下捲時朝畫面邊緣滑出（排版階段位移）
+            if (classic) {
+                val classicActions = ClassicActions(
+                    onQuery = { if (it.text != query.text) typed = true; query = it },
+                    onFocus = {
+                        query = TextFieldValue(tab.url, TextRange(0, tab.url.length))
+                        typed = false
+                        focused = true
+                    },
+                    onSubmit = { if (it.isNotBlank()) tab.load(it); cancel() },
+                    onCancel = cancel,
+                    onPageMenu = { anchor -> menu.show(pageMenu(anchor, tab, vm, menuTone, context, pageActions)) },
+                    onTranslate = { anchor -> if (tab.isYouTube) menu.show(translateMenu(anchor, tab, vm)) else vm.toggleTranslate(tab) },
+                    onDownloads = { pageActions.onDownloads() },
+                    onBack = goBack,
+                    backEnabled = tab.canGoBack || !tab.isBlank,
+                    onBackLongPress = backHistory,
+                    onShare = { share(context, tab.url, tab.title) },
+                    onBookmarks = { pageActions.onLibrary() },
+                    onTabs = { enterOverview(null) },
+                    onTabsLongPress = tabsMenu,
+                )
+                val out = { if (focused) hide.value else maxOf(hide.value, vm.collapse) }
+                val down = Modifier.offset {
+                    // 底部版面跟著鍵盤往上（輸入網址時工具列收起，只剩網址欄貼在鍵盤上方）
+                    val lift = if (barTop) 0 else (imeInsets.getBottom(this) - navInsets.getBottom(this)).coerceAtLeast(0)
+                    IntOffset(0, (out() * hideShift).roundToInt() - lift)
+                }
+                if (barTop) {
+                    ClassicTopBar(vm, tab, haze, tone, focused, query, classicActions, Modifier.align(Alignment.TopCenter).offset { IntOffset(0, (-out() * hideShift).roundToInt()) })
+                    if (!focused) ClassicBottomToolbar(vm, tab, haze, tone, classicActions, Modifier.align(Alignment.BottomCenter).then(down))
+                } else ClassicBottomBar(vm, tab, haze, tone, focused, query, classicActions, Modifier.align(Alignment.BottomCenter).then(down))
             }
 
             if (vm.controlsHidden) {

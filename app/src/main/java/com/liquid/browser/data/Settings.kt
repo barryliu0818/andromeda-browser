@@ -50,8 +50,8 @@ data class Settings(
     val blockRedirects: Boolean = true,
     /** 網址列上方顯示「下載影片」按鈕（偵測到影片時） */
     val videoDownloadButton: Boolean = true,
-    /** 網址列放在畫面頂端（直向時；橫向一律在頂端） */
-    val addressBarTop: Boolean = false,
+    /** 網址列版面（直向時；橫向一律在頂端）：精簡／底部／頂部，同 Safari */
+    val barLayout: BarLayout = BarLayout.Compact,
     /** 封鎖第三方 Cookie（嵌在別的網站裡、用來跨網站追蹤的 Cookie） */
     val blockThirdPartyCookies: Boolean = true,
     /** 所有瀏覽都拿掉網址上的追蹤參數（關閉時只有無痕分頁拿掉，同 Safari） */
@@ -86,6 +86,7 @@ class SettingsStore(private val context: Context) {
         val videoDl = booleanPreferencesKey("video_download_button")
         val appLang = stringPreferencesKey("app_lang")
         val barTop = booleanPreferencesKey("address_bar_top")
+        val layout = stringPreferencesKey("bar_layout")
         val tpc = booleanPreferencesKey("block_third_party_cookies")
         val cleanAll = booleanPreferencesKey("clean_links_everywhere")
         fun trKey(e: TranslateEngine) = stringPreferencesKey("translate_key_${e.name}")
@@ -113,7 +114,8 @@ class SettingsStore(private val context: Context) {
         adAllow = this[K.adAllow] ?: emptySet(),
         blockRedirects = this[K.redirects] ?: true,
         videoDownloadButton = this[K.videoDl] ?: true,
-        addressBarTop = this[K.barTop] ?: false,
+        // 舊版只有「網址列在頂部」開關：開著的當成頂部版面
+        barLayout = this[K.layout]?.let { runCatching { BarLayout.valueOf(it) }.getOrNull() } ?: if (this[K.barTop] == true) BarLayout.Top else BarLayout.Compact,
         blockThirdPartyCookies = this[K.tpc] ?: true,
         cleanLinksEverywhere = this[K.cleanAll] ?: false,
         appLang = this[K.appLang]?.let { runCatching { com.liquid.browser.core.AppLang.valueOf(it) }.getOrNull() } ?: com.liquid.browser.core.AppLang.System,
@@ -137,7 +139,8 @@ class SettingsStore(private val context: Context) {
             p[K.adAllow] = n.adAllow
             p[K.redirects] = n.blockRedirects
             p[K.videoDl] = n.videoDownloadButton
-            p[K.barTop] = n.addressBarTop
+            p[K.layout] = n.barLayout.name
+            p.remove(K.barTop)
             p[K.tpc] = n.blockThirdPartyCookies
             p[K.cleanAll] = n.cleanLinksEverywhere
             p[K.appLang] = n.appLang.name
@@ -148,4 +151,14 @@ class SettingsStore(private val context: Context) {
             if (n.startBackground == null) p.remove(K.bg) else p[K.bg] = n.startBackground
         }
     }
+}
+
+/** 網址列版面（Safari 的三種「標籤頁」佈局） */
+enum class BarLayout {
+    /** 精簡：浮在底部的一列——返回鈕、網址列、分頁鈕 */
+    Compact,
+    /** 底部：底部一整條工具區——網址列，下面一排返回／前進／分享／書籤／分頁 */
+    Bottom,
+    /** 頂部：網址列在頂端一整條，底部一排返回／前進／分享／書籤／分頁 */
+    Top,
 }
