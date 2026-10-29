@@ -26,8 +26,9 @@ enum class TranslateEngine(private val labelKey: String, val endpoint: String, v
     Free("免費（Google，中國無法使用）", "https://translate.googleapis.com/translate_a/t", "", ""),
     DeepSeek("DeepSeek V4.1 Flash", BAILIAN, "deepseek-v4.1-flash", ""),
     Qwen("通義千問 3.8 Flash", BAILIAN, "qwen3.8-flash", ""),
-    // 需先在百煉控制台開通 glm-5.3-flash，否則會回「Access denied」（此時自動改用免費翻譯）
-    Glm("智譜 GLM-5.3 Flash", BAILIAN, "glm-5.3-flash", ""),
+    // 百煉上的智譜模型名稱帶廠商前綴（ZHIPU/）；翻譯關掉思考（enable_thinking=false）求快。
+    // 需先在百煉控制台開通，否則會回「Access denied」（此時自動改用免費翻譯）
+    Glm("智譜 GLM-5.3 Flash", BAILIAN, "ZHIPU/GLM-5.3-Flash", ""),
     ;
 
     /** 顯示名稱（依介面語言翻譯） */

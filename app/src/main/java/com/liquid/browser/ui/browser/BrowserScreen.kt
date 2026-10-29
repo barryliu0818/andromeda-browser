@@ -591,14 +591,18 @@ fun BrowserScreen(vm: BrowserViewModel) {
                 }
             }
 
-            // 聚焦輸入時背景網頁輕微變暗；點遮罩等同取消
+            // 聚焦輸入時背景網頁輕微變暗；點遮罩等同取消。
+            // 遮罩出現後 350ms 內的點擊不算：點網址列進入輸入時，網址列從系統模糊視窗搬回主畫面，
+            // 系統（MIUI）會把同一次觸控的剩餘部分改送給主畫面，落在剛出現的遮罩上就被當成「點空白處取消」，
+            // 輸入框立刻失去焦點、鍵盤被收起（看起來就是鍵盤沒跳出來）
             val dim = animateFloatAsState(if (focused) 0.28f else 0f, Motion.timed(), label = "dim")
             if (focused || dim.value > 0f) {
+                val shownAt = remember(focused) { android.os.SystemClock.uptimeMillis() }
                 Box(
                     Modifier.fillMaxSize()
                         .graphicsLayer { alpha = dim.value }
                         .background(Color.Black)
-                        .pointerInput(Unit) { detectTapGestures { cancel() } },
+                        .pointerInput(Unit) { detectTapGestures { if (android.os.SystemClock.uptimeMillis() - shownAt > 350) cancel() } },
                 )
             }
 
@@ -735,7 +739,9 @@ fun BrowserScreen(vm: BrowserViewModel) {
                                 vm, tab, haze, tone, focused, query,
                                 onQuery = { if (it.text != query.text) typed = true; query = it },
                                 onFocus = {
-                                    query = TextFieldValue(tab.url, TextRange(0, tab.url.length))
+                                    // 網頁先放掉焦點與輸入連線，網址列的輸入框才接得上輸入法
+                    tab.webView.clearFocus()
+                    query = TextFieldValue(tab.url, TextRange(0, tab.url.length))
                                     typed = false
                                     focused = true
                                 },
@@ -785,7 +791,9 @@ fun BrowserScreen(vm: BrowserViewModel) {
                 val classicActions = ClassicActions(
                     onQuery = { if (it.text != query.text) typed = true; query = it },
                     onFocus = {
-                        query = TextFieldValue(tab.url, TextRange(0, tab.url.length))
+                        // 網頁先放掉焦點與輸入連線，網址列的輸入框才接得上輸入法
+                    tab.webView.clearFocus()
+                    query = TextFieldValue(tab.url, TextRange(0, tab.url.length))
                         typed = false
                         focused = true
                     },

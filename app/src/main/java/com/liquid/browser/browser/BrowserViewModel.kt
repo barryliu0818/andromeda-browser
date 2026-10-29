@@ -398,12 +398,11 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
 
     /** 常用網站：最常造訪在前，不足時以預設網站補齊。 */
     /**
-     * 常用網站：使用者加入／編輯過的排最前面，接著是最近 30 天最常去的網站、預設網站；刪掉的網域不出現，同網域只留一個。
-     * 傳入 settings（呼叫端用 collectAsState 讀到的值），設定改變時畫面會跟著更新。
+     * 常用網站（Safari 的「喜好項目」）：只有使用者自己加入／編輯過的，加上預設網站；不會因為常去就自動加進來。
+     * 刪掉的網域不出現，同網域只留一個。傳入 settings（呼叫端用 collectAsState 讀到的值），設定改變時畫面會跟著更新。
      */
     fun topSites(n: Int = 8, s: Settings = settings.value): List<Visit> {
-        val visited = frequent.value.map { Visit("https://${it.host}", it.title) }
-        return (s.favorites.map { (t, u) -> Visit(u, t) } + visited + DEFAULT_SITES)
+        return (s.favorites.map { (t, u) -> Visit(u, t) } + DEFAULT_SITES)
             .filter { favHost(it.url) !in s.hiddenFavorites }
             .distinctBy { favHost(it.url) }.take(n)
     }

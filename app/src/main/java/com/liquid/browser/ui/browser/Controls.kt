@@ -1,5 +1,7 @@
 package com.liquid.browser.ui.browser
 
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.togetherWith
 import androidx.compose.ui.graphics.Brush
@@ -514,18 +516,20 @@ internal fun UrlInput(
 }
 
 /**
- * 輸入框一出現就聚焦並叫出鍵盤。只 requestFocus 不夠：網頁（WebView）剛剛持有焦點或鍵盤時，
- * 系統常常不會自動跳出鍵盤，所以聚焦後明確 show() 一次，下一幀再補一次（輸入法還在切換連線時第一次會被忽略）。
+ * 輸入框一出現就聚焦：輸入框連上輸入法後會自己叫出鍵盤。
+ * 不要在聚焦當下就 show()：那時輸入框還沒連上輸入法，系統拿空的連線去叫鍵盤，
+ * 微信輸入法等會把自己縮成 0 高度（看起來鍵盤沒出現）。250ms 後鍵盤還沒出現才補叫一次。
+ * 網頁要先放掉焦點（呼叫端 onFocus 時 webView.clearFocus()），否則輸入連線可能還被網頁占著。
  */
 @Composable
 internal fun FocusAndShowKeyboard(fr: FocusRequester) {
     val kb = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val ime = WindowInsets.ime
+    val density = LocalDensity.current
     LaunchedEffect(Unit) {
         fr.requestFocus()
-        kb?.show()
-        androidx.compose.runtime.withFrameNanos { }
-        kotlinx.coroutines.delay(120)
-        kb?.show()
+        kotlinx.coroutines.delay(250)
+        if (ime.getBottom(density) == 0) kb?.show()
     }
 }
 
