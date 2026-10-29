@@ -128,6 +128,22 @@ class Tab(
     var asIPhone = identifyAsIPhone
         private set
     private var iosShim: ScriptHandler? = null
+    /** 目前實際套用的是否為 Apple 身分（個別網站例外時與 asIPhone 不同） */
+    private var appliedIos: Boolean? = null
+
+    /** 這個網址要不要用 Apple 身分：asIPhone 開著、且不在例外清單（[NO_IOS_HOSTS]） */
+    private fun iosFor(url: String?): Boolean {
+        if (!asIPhone) return false
+        val host = url?.let { Uri.parse(it).host }.orEmpty()
+        return NO_IOS_HOSTS.none { host == it || host.endsWith(".$it") }
+    }
+
+    /** 換到身分不同的網站前先切換（UA 在請求送出前就要對）；回傳是否有切換 */
+    private fun switchIdentityFor(url: String): Boolean {
+        if (iosFor(url) == appliedIos) return false
+        applyIdentity(reload = false, forUrl = url)
+        return true
+    }
 
     /** 文字大小百分比（WebSettings.textZoom） */
     var textZoom by mutableIntStateOf(100)
@@ -279,6 +295,11 @@ class Tab(
                 }
                 if (isMediaUrl(request.url.toString()) && listener.onMediaUrl(this@Tab, request.url.toString())) return true
                 rememberShownPage()
+                // 要去的網站身分不同（例如從一般網站點進 YouTube）：切換後自己重新發出這個請求
+                if (request.method == "GET" && switchIdentityFor(request.url.toString())) {
+                    view.loadUrl(request.url.toString())
+                    return true
+                }
                 return false
             }
 
@@ -314,6 +335,12 @@ class Tab(
                 media.clear()
                 blockedCount = 0
                 pageHost = Uri.parse(u).host.orEmpty()
+                // 沒經過 shouldOverrideUrlLoading 的導覽（上一頁／下一頁、伺服器轉址）身分不對：切換後重新載入
+                if (switchIdentityFor(u)) {
+                    view.stopLoading()
+                    view.loadUrl(u)
+                    return
+                }
                 if (listener.adBlockFor(pageHost)) view.evaluateJavascript(AdBlocker.COSMETIC_JS, null)
                 translated = false
                 trTarget = null
@@ -475,6 +502,7 @@ class Tab(
         // WebView 還沒放上畫面（寬度 0）就載入的話，網頁會以 0 寬度排版，之後可能留下錯誤的縮放與水平捲動：
         // 等量到實際寬度再載入
         whenSized {
+            switchIdentityFor(target)
             // 不支援 allow-list 的 WebView：至少把主頁面請求的 X-Requested-With 覆寫成空值
             if (asIPhone) webView.loadUrl(target, mapOf("X-Requested-With" to "")) else webView.loadUrl(target)
         }
@@ -507,8 +535,10 @@ class Tab(
      *  iPhone＋行動版 → iPhone Safari；iPhone＋桌面版 → macOS Safari；
      *  Android＋桌面版 → 桌面 Chrome；Android＋行動版 → WebView 預設。
      */
-    private fun applyIdentity(reload: Boolean) {
+    private fun applyIdentity(reload: Boolean, forUrl: String? = url) {
         val ctx = webView.context
+        val asIPhone = iosFor(forUrl)
+        appliedIos = asIPhone
         webView.settings.userAgentString = when {
             asIPhone && desktop -> MAC_SAFARI_UA
             asIPhone -> IPHONE_SAFARI_UA
@@ -819,6 +849,12 @@ private const val END_SPACER_JS = """(function(){
 })();"""
 
 /** iOS 26 Safari：OS 版本在 UA 中固定為 18_6，Safari 版本為 26.0 */
+/**
+ * 「識別為 iPhone」的例外網站（像 Firefox 的個別網站相容性處理）：這些網站用真實的 Android 身分。
+ * YouTube：防機器人權杖是在 Chromium 環境產生的，跟 iPhone 身分對不上 → 字幕檔回傳空白、全螢幕走 iPhone 路線只放大 <video>
+ */
+private val NO_IOS_HOSTS = listOf("youtube.com", "youtube-nocookie.com", "youtu.be")
+
 const val IPHONE_SAFARI_UA =
     "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1"
 const val MAC_SAFARI_UA =
