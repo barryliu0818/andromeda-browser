@@ -299,6 +299,10 @@ fun BrowserScreen(vm: BrowserViewModel) {
             overview = true
             scope.launch {
                 ov.progress.snapTo(0f)
+                // 總覽的第一幀要組合整個網格、第一次擺放底部玻璃視窗（實測約 45ms）：先把靜止的起點畫完再開始動畫，
+                // 否則動畫時鐘已經在走，前 45ms 的動作直接被跳過，看起來就是一頓
+                androidx.compose.runtime.withFrameNanos {}
+                androidx.compose.runtime.withFrameNanos {}
                 ov.progress.animateTo(1f, Motion.overview())
                 ov.active = false
                 ov.from = null
