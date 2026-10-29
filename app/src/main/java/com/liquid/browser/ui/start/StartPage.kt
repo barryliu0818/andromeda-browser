@@ -1,5 +1,7 @@
 package com.liquid.browser.ui.start
 
+import com.liquid.browser.ui.glass.MenuSpec
+import com.liquid.browser.ui.glass.MenuItem
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.role
@@ -239,12 +241,38 @@ private fun FavoritesPage(
     val icons by vm.icons.collectAsState()
     val scope = rememberCoroutineScope()
     val reading by remember { vm.db.reading().all() }.collectAsState(emptyList())
-    val sites = vm.topSites()
+    val settings by vm.settings.collectAsState()
+    // 7 個網站＋最後一格「＋」（加入常用網站）
+    val sites = vm.topSites(7, settings)
+    // 編輯中的常用網站：first＝原本的網址（新增時為 null）、second＝名稱、third＝網址
+    var editing by remember { mutableStateOf<Triple<String?, String, String>?>(null) }
+    editing?.let { (old, title, url) ->
+        FavoriteDialog(if (old == null) t("加入常用網站") else t("編輯常用網站"), title, url, onDismiss = { editing = null }) { newTitle, newUrl ->
+            vm.saveFavorite(old, newTitle, newUrl)
+            editing = null
+        }
+    }
     val showAll = { page: Int -> scope.launch { pager.animateScrollToPage(page, animationSpec = Motion.glass()) }; Unit }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = padding) {
         item(key = "fav") {
-            SectionHeader(t("常用網站"), content, if (sites.size > 8) ({ showAll(1) }) else null)
-            TopSites(sites.take(8), icons, content, onPick = onOpen)
+            SectionHeader(t("常用網站"), content, null)
+            FavoritesGrid(
+                sites, icons, content, onPick = onOpen,
+                // 長按：在新分頁開啟／編輯／刪除
+                onLongPress = { site, bounds ->
+                    menu.show(
+                        MenuSpec(
+                            bounds,
+                            listOf(
+                                MenuItem(t("在新分頁開啟"), "add_box") { vm.newTab(site.url) },
+                                MenuItem(t("編輯"), "edit") { editing = Triple(site.url, site.title, site.url) },
+                                MenuItem(t("刪除"), "delete", destructive = true) { vm.removeFavorite(site.url) },
+                            ),
+                        ),
+                    )
+                },
+                onAdd = { editing = Triple(null, "", "") },
+            )
         }
         if (reading.isNotEmpty()) {
             item(key = "rl") { SectionHeader(t("閱讀列表"), content, { showAll(2) }, top = 28.dp) }
@@ -263,6 +291,129 @@ private fun FavoritesPage(
             }
         }
     }
+}
+
+/**
+ * 常用網站格子（4 欄）：每格依序淡入；長按跳出選單（在新分頁開啟／編輯／刪除）；最後一格「＋」加入常用網站。
+ * 刪除時那格縮小淡出、後面的格子平順補位（animateItem 式的位移），不是瞬間跳掉。
+ */
+@Composable
+private fun FavoritesGrid(
+    sites: List<Visit>, icons: Map<String, String>, content: Color, onPick: (String) -> Unit,
+    onLongPress: (Visit, Rect) -> Unit, onAdd: () -> Unit,
+) {
+    val cells: List<Visit?> = sites + null
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        cells.chunked(4).forEachIndexed { r, row ->
+            Row(Modifier.fillMaxWidth()) {
+                row.forEachIndexed { c, site ->
+                    androidx.compose.runtime.key(site?.url ?: "add") {
+                        val appear = remember { Animatable(if (Motion.reduced) 1f else 0f) }
+                        LaunchedEffect(Unit) { delay((r * 4 + c) * 30L); appear.animateTo(1f, Motion.glass()) }
+                        val m = Modifier.weight(1f).graphicsLayer {
+                            alpha = appear.value
+                            translationY = (1f - appear.value) * 12.dp.toPx()
+                            val s = 0.9f + 0.1f * appear.value
+                            scaleX = s; scaleY = s
+                        }
+                        if (site == null) AddTile(content, m, onAdd)
+                        else FavoriteTile(site, icons, content, m, { onLongPress(site, it) }) { onPick(site.url) }
+                    }
+                }
+                repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun FavoriteTile(site: Visit, icons: Map<String, String>, content: Color, modifier: Modifier, onLongPress: (Rect) -> Unit, onClick: () -> Unit) {
+    val host = Uri.parse(site.url).host?.removePrefix("www.").orEmpty()
+    var bounds by remember { mutableStateOf(Rect.Zero) }
+    val haptic = LocalHapticFeedback.current
+    Column(
+        modifier.clip(RoundedCornerShape(Dimens.TileRadius))
+            .onGloballyPositioned { bounds = it.boundsInRoot() }
+            .combinedClickable(onLongClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onLongPress(bounds) }, onClick = onClick)
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        SiteIcon(host, icons, Dimens.Tile, Dimens.TileRadius)
+        Text(
+            site.title.ifBlank { host }, Modifier.padding(top = 6.dp).widthIn(max = 76.dp),
+            color = content, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, lineHeight = 15.sp,
+        )
+    }
+}
+
+/** 「＋」格：跟網站圖示同大小同圓角的淡色方塊 */
+@Composable
+private fun AddTile(content: Color, modifier: Modifier, onClick: () -> Unit) {
+    Column(
+        modifier.clip(RoundedCornerShape(Dimens.TileRadius)).clickable(onClick = onClick).padding(vertical = 4.dp)
+            .semantics(mergeDescendants = true) { contentDescription = t("加入常用網站"); role = Role.Button },
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(Modifier.size(Dimens.Tile).clip(RoundedCornerShape(Dimens.TileRadius)).background(content.copy(alpha = 0.08f)), Alignment.Center) {
+            Sym("add", content.copy(alpha = 0.6f), 28.dp)
+        }
+        Text(t("加入"), Modifier.padding(top = 6.dp), color = content.copy(alpha = 0.6f), fontSize = 12.sp, maxLines = 1)
+    }
+}
+
+/**
+ * 加入／編輯常用網站：名稱與網址兩個欄位；網址要像網址（www、.com、IP…）才能儲存，名稱空白時用網域。
+ * 對話框是 20dp 圓角的卡片，從中間淡入並微微放大（減速曲線）。
+ */
+@Composable
+private fun FavoriteDialog(title: String, initialName: String, initialUrl: String, onDismiss: () -> Unit, onSave: (String, String) -> Unit) {
+    var name by remember { mutableStateOf(initialName) }
+    var url by remember { mutableStateOf(initialUrl) }
+    val valid = com.liquid.browser.browser.looksLikeUrl(url)
+    val dark = isSystemInDarkTheme()
+    val content = if (dark) Color.White else Palette.Ink
+    val accent = com.liquid.browser.ui.accent
+    val appear = remember { Animatable(if (Motion.reduced) 1f else 0f) }
+    LaunchedEffect(Unit) { appear.animateTo(1f, Motion.glass()) }
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier.fillMaxWidth().graphicsLayer { alpha = appear.value; val s = 0.94f + 0.06f * appear.value; scaleX = s; scaleY = s }
+                .clip(RoundedCornerShape(Dimens.CardRadius)).background(if (dark) Palette.CardDark else Palette.CardLight).padding(20.dp),
+        ) {
+            Text(title, color = content, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            FieldBox(t("名稱"), name, content, accent) { name = it }
+            FieldBox(t("網址"), url, content, accent, uri = true) { url = it }
+            if (url.isNotBlank() && !valid) Text(t("請輸入網址，例如 example.com"), Modifier.padding(top = 6.dp), color = Color(0xFFFF3B30), fontSize = 13.sp)
+            Row(Modifier.fillMaxWidth().padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(14.dp)).background(content.copy(alpha = 0.08f)).clickable(onClick = onDismiss), Alignment.Center) {
+                    Text(t("取消"), color = content, fontSize = 16.sp)
+                }
+                Box(
+                    Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(14.dp)).background(if (valid) accent else accent.copy(alpha = 0.35f))
+                        .clickable(enabled = valid) {
+                            val full = com.liquid.browser.browser.toUrl(url, "")
+                            onSave(name.trim().ifBlank { Uri.parse(full).host?.removePrefix("www.").orEmpty() }, full)
+                        },
+                    Alignment.Center,
+                ) { Text(t("儲存"), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FieldBox(label: String, value: String, content: Color, accent: Color, uri: Boolean = false, onChange: (String) -> Unit) {
+    Text(label, Modifier.padding(top = 14.dp, bottom = 6.dp), color = content.copy(alpha = 0.6f), fontSize = 13.sp)
+    androidx.compose.foundation.text.BasicTextField(
+        value, onChange, singleLine = true,
+        textStyle = androidx.compose.ui.text.TextStyle(color = content, fontSize = 16.sp),
+        cursorBrush = androidx.compose.ui.graphics.SolidColor(accent),
+        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+            keyboardType = if (uri) androidx.compose.ui.text.input.KeyboardType.Uri else androidx.compose.ui.text.input.KeyboardType.Text, autoCorrectEnabled = false,
+        ),
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(content.copy(alpha = 0.06f)).padding(horizontal = 12.dp, vertical = 12.dp),
+    )
 }
 
 /** 段落標題（Safari）：粗體標題，右側「全部顯示 ›」 */

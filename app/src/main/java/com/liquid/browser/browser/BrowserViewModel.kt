@@ -396,9 +396,35 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     }
 
     /** 常用網站：最常造訪在前，不足時以預設網站補齊。 */
-    fun topSites(n: Int = 8): List<Visit> {
+    /**
+     * 常用網站：使用者加入／編輯過的排最前面，接著是最近 30 天最常去的網站、預設網站；刪掉的網域不出現，同網域只留一個。
+     * 傳入 settings（呼叫端用 collectAsState 讀到的值），設定改變時畫面會跟著更新。
+     */
+    fun topSites(n: Int = 8, s: Settings = settings.value): List<Visit> {
         val visited = frequent.value.map { Visit("https://${it.host}", it.title) }
-        return (visited + DEFAULT_SITES).distinctBy { Uri.parse(it.url).host?.removePrefix("www.") }.take(n)
+        return (s.favorites.map { (t, u) -> Visit(u, t) } + visited + DEFAULT_SITES)
+            .filter { favHost(it.url) !in s.hiddenFavorites }
+            .distinctBy { favHost(it.url) }.take(n)
+    }
+
+    private fun favHost(url: String) = Uri.parse(url).host?.removePrefix("www.").orEmpty()
+
+    /**
+     * 加入或編輯常用網站：old＝原本那筆的網址（加入時為 null）。編輯時留在原本的位置，加入的排在自己加的最後面；
+     * 換了網域時原網域從清單隱藏（不然它會以「常去的網站」身分又冒出來），新網域如果之前刪過就恢復。
+     */
+    fun saveFavorite(old: String?, title: String, url: String) = updateSettings { s ->
+        val at = s.favorites.indexOfFirst { it.second == old }
+        val others = s.favorites.filter { (_, u) -> u != old && favHost(u) != favHost(url) }.toMutableList()
+        others.add(if (at >= 0) at.coerceAtMost(others.size) else others.size, title to url)
+        var hidden = s.hiddenFavorites - favHost(url)
+        if (old != null && favHost(old) != favHost(url)) hidden = hidden + favHost(old)
+        s.copy(favorites = others, hiddenFavorites = hidden)
+    }
+
+    /** 刪除常用網站：拿掉自己加的那筆，並記住這個網域不再自動出現 */
+    fun removeFavorite(url: String) = updateSettings { s ->
+        s.copy(favorites = s.favorites.filter { favHost(it.second) != favHost(url) }, hiddenFavorites = s.hiddenFavorites + favHost(url))
     }
 
     override fun onDownload(tab: Tab, url: String, userAgent: String, contentDisposition: String?, mime: String?) {

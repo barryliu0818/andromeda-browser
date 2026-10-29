@@ -97,7 +97,7 @@ fun ClassicUrlField(vm: BrowserViewModel, tab: Tab, tone: Tone, focused: Boolean
                 .clickable(enabled = !focused) { a.onFocus() },
         ) {
             Crossfade(focused, animationSpec = Motion.timed(Motion.ShortMs), label = "url") { f ->
-                if (f) UrlInput(query, tone, accent, vm.settings.collectAsState().value.engine, { vm.updateSettings { it.copy(engine = it.engine.next()) } }, a.onQuery, a.onSubmit)
+                if (f) UrlInput(query, tone, accent, vm.settings.collectAsState().value.engine, { vm.updateSettings { it.copy(engine = it.nextEngine()) } }, a.onQuery, a.onSubmit)
                 else {
                     val target = vm.settings.collectAsState().value.translateTarget
                     val canTranslate = !tab.isBlank && (tab.isYouTube || tab.translated || !tab.alreadyIn(target))

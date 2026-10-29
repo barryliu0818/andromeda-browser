@@ -1,5 +1,6 @@
 package com.liquid.browser.ui.settings
 
+import com.liquid.browser.browser.Translator
 import com.liquid.browser.data.BarLayout
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.border
@@ -191,7 +192,7 @@ fun SettingsContent(vm: BrowserViewModel, tone: Tone) {
         item { GroupHeader(t("API 金鑰"), tone) }
         item(key = "keys") {
             val owner = TranslateEngine.Qwen
-            Column(Modifier.fillMaxWidth().groupItem(0, 2, tone).padding(horizontal = 16.dp, vertical = 6.dp)) {
+            Column(Modifier.fillMaxWidth().groupItem(0, 3, tone).padding(horizontal = 16.dp, vertical = 6.dp)) {
                 KeyField(t("阿里雲百煉（千問、DeepSeek、GLM 共用）"), s.translateKeys[owner].orEmpty(), t("阿里雲百煉控制台 → API-KEY"), tone, accent) { v ->
                     vm.updateSettings { st ->
                         st.copy(
@@ -208,8 +209,44 @@ fun SettingsContent(vm: BrowserViewModel, tone: Tone) {
                 }
             }
         }
+        item(key = "trcheck") {
+            // 測試連線：用目前選的 AI 引擎（選免費引擎時測千問）以金鑰送一句短句；結果直接顯示在這一列
+            val engine = if (s.translateEngine.isFree) TranslateEngine.Qwen else s.translateEngine
+            val key = s.translateKeys[engine.keyOwner].orEmpty()
+            var checking by remember { mutableStateOf(false) }
+            // 換了金鑰或引擎，舊的結果就不算數
+            var result by remember(key, engine) { mutableStateOf<Pair<Boolean, String>?>(null) }
+            val scope = rememberCoroutineScope()
+            GroupRow(
+                1, 3, tone, t("測試連線"),
+                subtitle = when {
+                    key.isBlank() -> t("先貼上金鑰")
+                    checking -> t("連線中…")
+                    result != null -> result!!.second
+                    else -> t("用 %1\$s 送一句短句，確認金鑰可以用", engine.label)
+                },
+                leading = { IconTile("network_check", Color(0xFF007AFF)) },
+                trailing = {
+                    when {
+                        checking -> androidx.compose.material3.CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = accent)
+                        result?.first == true -> Sym("check_circle", Color(0xFF34C759), 22.dp)
+                        result?.first == false -> Sym("error", red, 22.dp)
+                    }
+                },
+                onClick = if (key.isBlank() || checking) null else ({
+                    checking = true
+                    scope.launch {
+                        result = runCatching { Translator.check(engine, key, s.translateModels[engine].orEmpty()) }.fold(
+                            { ms -> true to t("連線成功・%1\$s 秒", "%.1f".format(ms / 1000f)) },
+                            { e -> false to (e.message?.takeIf { it.isNotBlank() } ?: t("連不上（%1\$s）", e.javaClass.simpleName)) },
+                        )
+                        checking = false
+                    }
+                }),
+            )
+        }
         item(key = "trcache") {
-            GroupRow(1, 2, tone, t("清除翻譯快取"), leading = { IconTile("delete_sweep", Palette.Gray) }, onClick = {
+            GroupRow(2, 3, tone, t("清除翻譯快取"), leading = { IconTile("delete_sweep", Palette.Gray) }, onClick = {
                 vm.clearTranslationCache(); vm.showToast(t("已清除翻譯快取"))
             })
             GroupFooter(t("翻過的文字存在手機上，重新整理或再次造訪時直接套用，不再花 API 額度"))

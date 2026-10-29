@@ -228,7 +228,7 @@ fun Controls(
             ) {
                 // 網域文字與完整網址輸入框之間淡入淡出
                 Crossfade(focused, animationSpec = Motion.timed(Motion.ShortMs), label = "url") { f ->
-                    if (f) UrlInput(query, tone, accent, vm.settings.collectAsState().value.engine, { vm.updateSettings { it.copy(engine = it.engine.next()) } }, onQuery, onSubmit)
+                    if (f) UrlInput(query, tone, accent, vm.settings.collectAsState().value.engine, { vm.updateSettings { it.copy(engine = it.nextEngine()) } }, onQuery, onSubmit)
                     else {
                         // 翻譯鈕：網頁已經是翻譯目標語言時不出現（YouTube 有字幕翻譯，一律出現；翻譯中／已翻譯也留著，用來切回原文）
                         val target = vm.settings.collectAsState().value.translateTarget
@@ -513,8 +513,8 @@ internal fun UrlInput(
     }
 }
 
-/** 下一個搜尋引擎（輸入框前的引擎圖示點一下） */
-internal fun SearchEngine.next(): SearchEngine = SearchEngine.entries[(ordinal + 1) % SearchEngine.entries.size]
+/** 輸入框前的引擎圖示點一下：在設定裡選的兩個快速切換引擎之間切換 */
+internal fun com.liquid.browser.data.Settings.nextEngine(): SearchEngine = if (engine == quickEngines[0]) quickEngines[1] else quickEngines[0]
 
 /**
  * 搜尋引擎的小圖示：用品牌色畫字母標誌（不連網抓圖、不內嵌官方圖檔）。
@@ -529,6 +529,8 @@ internal fun EngineIcon(engine: SearchEngine, size: Dp) {
             style = TextStyle(brush = Brush.sweepGradient(listOf(Color(0xFFEA4335), Color(0xFFFBBC05), Color(0xFF34A853), Color(0xFF4285F4), Color(0xFFEA4335)))),
         )
         SearchEngine.Bing -> Text("b", color = Color(0xFF0C8EC6), fontSize = fs, fontWeight = FontWeight.Bold, lineHeight = fs)
+        SearchEngine.Yahoo -> Text("Y!", color = Color(0xFF6001D2), fontSize = fs * 0.8f, fontWeight = FontWeight.Black, lineHeight = fs)
+        SearchEngine.Baidu -> Box(Modifier.size(size).clip(CircleShape).background(Color(0xFF2932E1)), Alignment.Center) { Text("百", color = Color.White, fontSize = fs * 0.62f, fontWeight = FontWeight.Bold, lineHeight = fs) }
         else -> Box(
             Modifier.size(size).clip(CircleShape).background(if (engine == SearchEngine.Yandex) Color(0xFFFC3F1D) else Color(0xFFDE5833)),
             Alignment.Center,

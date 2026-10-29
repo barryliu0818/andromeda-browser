@@ -66,6 +66,16 @@ object Translator {
             }
         }
 
+    /**
+     * 測試 AI 引擎的連線與金鑰：送一句短句，成功回傳耗時（毫秒）；失敗丟出帶原因的例外
+     * （HTTP 狀態碼與服務回的訊息，例如金鑰無效、模型沒開通、連不上）。
+     */
+    suspend fun check(engine: TranslateEngine, key: String, model: String): Long = withContext(Dispatchers.IO) {
+        val start = System.nanoTime()
+        llm(listOf("Hello"), engine, key, model.ifBlank { engine.model }, TargetLang.ZhTW)
+        (System.nanoTime() - start) / 1_000_000
+    }
+
     /** 騰訊交互翻譯（TranSmart）：一次送多段，來源語言自動偵測 */
     fun tencent(texts: List<String>, target: TargetLang): List<String> {
         val payload = JSONObject()
