@@ -76,6 +76,22 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         CrashLog.showIfAny(this)
+        // 預先載入（第一個畫面畫完、主執行緒閒下來才做，不拖慢啟動）：
+        //  - 先把網頁渲染程序開好（約 30～50MB）：第一次開網頁不必等程序啟動
+        //  - 先連上搜尋引擎、翻譯伺服器（DNS＋TLS 握手）：搜尋、翻譯第一個請求更快
+        android.os.Looper.myQueue().addIdleHandler {
+            runCatching {
+                if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.MULTI_PROFILE)) {
+                    val profile = androidx.webkit.ProfileStore.getInstance().getProfile(androidx.webkit.Profile.DEFAULT_PROFILE_NAME)
+                    if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.WARM_UP_RENDERER_PROCESS)) profile?.warmUpRendererProcess()
+                    if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.PRECONNECT)) {
+                        val engine = android.net.Uri.parse(vm.settings.value.engine.prefix)
+                        listOf("${engine.scheme}://${engine.host}", "https://transmart.qq.com", "https://cn-beijing.maas.qianwenaiapi.com").forEach { profile?.preconnect(it) }
+                    }
+                }
+            }
+            false
+        }
         // 智適應刷新率：操作時 120Hz、靜止後交還系統降頻；網頁捲動（含慣性滑動）也算在操作
         vm.onUserActivity = refresh::poke
         installImageLoader(applicationContext)

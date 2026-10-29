@@ -80,6 +80,9 @@ class Tab(
         /** 登入表單送出：詢問要不要儲存這組帳密 */
         fun onPasswordSubmit(tab: Tab, origin: String, user: String, pass: String)
 
+        /** 之前翻譯過的網頁重新載入完成：再翻一次（走快取） */
+        fun onReapplyTranslation(tab: Tab)
+
         /** 這個分頁要不要拿掉網址上的追蹤參數（無痕分頁一律要；設定可改成所有瀏覽） */
         fun cleanLinks(tab: Tab): Boolean
 
@@ -198,8 +201,15 @@ class Tab(
     /** 開始原地翻譯（腳本只注入一次；切回原文後再翻會直接套用已有譯文） */
     fun startTranslate(script: String) {
         translated = true
+        url.takeIf { it.startsWith("http") }?.let { translatedUrls += it }
         webView.evaluateJavascript("$script\n;window.__lqTr.start();", null)
     }
+
+    /**
+     * 翻譯過的網頁：重新整理、或返回時頁面得重新載入，載完自動再翻一次。
+     * 譯文從手機上的翻譯快取直接套用（翻過的文字不會再送出去，不花 API 額度）。按「顯示原文」就移除。
+     */
+    private val translatedUrls = mutableSetOf<String>()
 
     /** 換語言前：還原原文並丟掉舊譯文 */
     fun resetTranslate() {
@@ -242,6 +252,7 @@ class Tab(
 
     fun showOriginal() {
         translated = false
+        translatedUrls -= url
         webView.evaluateJavascript("window.__lqTr&&window.__lqTr.restore();", null)
     }
 
@@ -275,6 +286,20 @@ class Tab(
         if (incognito && WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
             ProfileStore.getInstance().getOrCreateProfile(INCOGNITO_PROFILE)
             WebViewCompat.setProfile(webView, INCOGNITO_PROFILE)
+        }
+        // 返回不重新載入（往返快取）：離開的網頁整頁留在記憶體，返回時直接還原（含捲動位置、已翻好的譯文）；
+        // 最多 3 頁、10 分鐘（每頁約數 MB～數十 MB，太多會吃記憶體）
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.BACK_FORWARD_CACHE)) {
+            @Suppress("RestrictedApi", "UnsafeOptInUsageError")
+            runCatching {
+                WebSettingsCompat.setBackForwardCacheEnabled(webView.settings, true)
+                if (WebViewFeature.isFeatureSupported(WebViewFeature.BACK_FORWARD_CACHE_SETTINGS)) {
+                    WebSettingsCompat.getBackForwardCacheSettings(webView.settings).apply {
+                        maxPagesInCache = 3
+                        timeoutSeconds = 600
+                    }
+                }
+            }
         }
         webView.settings.apply {
             javaScriptEnabled = true
@@ -420,6 +445,8 @@ class Tab(
 
             override fun onPageFinished(view: WebView, u: String) {
                 title = view.title.orEmpty()
+                // 這頁之前翻譯過（重新整理、返回時重新載入）：自動再翻一次（譯文走快取，不花 API 額度）
+                if (!translated && u in translatedUrls) listener.onReapplyTranslation(this@Tab)
                 if (legacyInject) view.evaluateJavascript(listener.injectedScript(), null)
                 // 同一頁可能觸發多次 onPageFinished（重新導向、SPA），只在網址改變時記錄一次
                 if (u != lastRecorded && !loadFailed) {

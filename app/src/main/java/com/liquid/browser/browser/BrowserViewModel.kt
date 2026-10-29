@@ -686,6 +686,8 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         return if (nightSwitch) TranslateEngine.DeepSeek else s.translateEngine
     }
 
+    override fun onReapplyTranslation(tab: Tab) { if (!tab.translated) toggleTranslate(tab) }
+
     fun toggleTranslate(tab: Tab) {
         if (tab.translated) tab.showOriginal()
         else {

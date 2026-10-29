@@ -1,5 +1,6 @@
 package com.liquid.browser.ui.browser
 
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.animation.core.animate
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.collectLatest
@@ -858,6 +859,18 @@ fun BrowserScreen(vm: BrowserViewModel) {
             }
 
             val statusTop = WindowInsets.statusBars.getTop(LocalDensity.current).toFloat()
+            // 預熱：App 閒置 3 秒後，把設定頁在看不見的地方（透明、在網頁之下）組合、排版一次再拆掉，只做一次：
+            // 字型、圖示與文字排版的快取先建好，之後第一次打開設定面板那一下比較不卡（實測第一次打開排版 56ms）
+            var warmSettings by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) { delay(3_000); warmSettings = true }
+            if (warmSettings) Box(Modifier.fillMaxSize().graphicsLayer { alpha = 0f }.clearAndSetSemantics { }) {
+                SettingsContent(vm, menuTone)
+                LaunchedEffect(Unit) {
+                    androidx.compose.runtime.withFrameNanos { }
+                    androidx.compose.runtime.withFrameNanos { }
+                    warmSettings = false
+                }
+            }
             LinkPreviewHost(vm, haze, menuTone, statusTop)
 
             // 分頁總覽：跟首頁同一套（沒有原生 backdrop 時用 Material 3 表面）
