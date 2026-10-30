@@ -820,7 +820,8 @@ fun BrowserScreen(vm: BrowserViewModel) {
                 }
                 if (barTop) {
                     ClassicTopBar(vm, tab, haze, tone, focused, query, classicActions, Modifier.align(Alignment.TopCenter).offset { IntOffset(0, (-out() * hideShift).roundToInt()) })
-                    if (!focused) ClassicBottomToolbar(vm, tab, haze, tone, classicActions, Modifier.align(Alignment.BottomCenter).then(down))
+                    // 底部工具列一直保留（輸入時被鍵盤蓋住）：離開輸入時不必重新組合（之前那一下會卡）
+                    ClassicBottomToolbar(vm, tab, haze, tone, classicActions, Modifier.align(Alignment.BottomCenter).then(down))
                 } else ClassicBottomBar(vm, tab, haze, tone, focused, query, classicActions, Modifier.align(Alignment.BottomCenter).then(down))
             }
 

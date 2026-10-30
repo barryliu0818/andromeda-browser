@@ -1,5 +1,8 @@
 package com.liquid.browser.ui.browser
 
+import kotlin.math.roundToInt
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.expandHorizontally
@@ -176,7 +179,15 @@ fun ClassicBottomBar(
         Column(Modifier.navigationBarsPadding().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 2.dp)) {
             ClassicUrlField(vm, tab, tone, focused, query, a)
             // 輸入網址時工具列讓位給鍵盤上方的空間
-            AnimatedVisibility(!focused) { ClassicToolbar(tab, tone, vm.visibleTabs().size, a, Modifier.padding(top = 2.dp)) }
+            // 工具列一直保留組合：收起／展開只改高度與透明度（在排版、繪製階段讀動畫值），
+            // 不像 AnimatedVisibility 每次離開輸入都要重新組合整排按鈕、動畫期間每幀重組（收鍵盤時卡頓的來源之一）
+            val show by androidx.compose.animation.core.animateFloatAsState(if (focused) 0f else 1f, if (focused) Motion.exit() else Motion.glass(), label = "toolbar")
+            ClassicToolbar(
+                tab, tone, vm.visibleTabs().size, a,
+                Modifier.padding(top = 2.dp).clipToBounds()
+                    .layout { m, c -> val p = m.measure(c); layout(p.width, (p.height * show).roundToInt()) { p.place(0, 0) } }
+                    .graphicsLayer { alpha = show },
+            )
         }
     }
 }
