@@ -74,7 +74,7 @@ data class MenuItem(
     val label: String,
     val icon: String? = null,
     val destructive: Boolean = false,
-    /** 打開選單外的下一層（設定、網站設定…）：選單往左推出、那一層從右推入，返回時選單從左推回；不重播變形動畫 */
+    /** 打開選單外的下一層（設定、網站設定…）：選單面板再變形成那一層的面板（Container Transform），選單就此關閉 */
     val push: Boolean = false,
     /** 選單內的下一層：面板內容推入式切換到這些項目（不重播變形動畫） */
     val sub: List<MenuItem>? = null,
@@ -103,12 +103,13 @@ class MenuState {
     /** 選單正被推到選單外的下一層（那一層讀它，決定用推入式進場） */
     var pushed by mutableStateOf(false)
         private set
-    internal var returning = false
-    private var last: MenuSpec? = null
+    /** 面板在螢幕上的範圍（排版階段更新）：打開下一層時，那一層從這個範圍變形長出 */
+    var panelRect = Rect.Zero
+        internal set
 
     fun show(spec: MenuSpec) {
-        this.spec = spec; last = spec
-        pages.clear(); pushed = false; returning = false
+        this.spec = spec
+        pages.clear(); pushed = false
         open = true
     }
 
@@ -123,11 +124,6 @@ class MenuState {
 
     internal fun push() { pushed = true; open = false }
 
-    /** 從選單外的下一層返回：選單從左邊推回來，停在離開時那一層（不重播變形） */
-    fun restore() {
-        val l = last ?: return
-        spec = l; pushed = false; returning = true; open = true
-    }
     internal fun clear() { spec = null }
 
     internal fun click(item: MenuItem) {
@@ -179,16 +175,11 @@ fun GlassMenuHost(state: MenuState, haze: HazeState, tone: Tone) {
     val t = remember(spec) { Animatable(0f) }
     // 每一項自己的進場進度（0 是頂部快捷列）
     val itemAnim = remember(spec) { List(spec.items.size + 1) { Animatable(0f) } }
-    // 推到選單外下一層的位移：0 = 在原位，-1 = 推到左邊（下一層蓋上來）
-    val slide = remember(spec) { Animatable(0f) }
     LaunchedEffect(spec, state.open) {
-        if (state.open && state.returning) {
-            // 從下一層返回：已經是面板外形，直接從左邊推回
-            t.snapTo(1f); itemAnim.forEach { it.snapTo(1f) }
-            slide.snapTo(-1f)
-            slide.animateTo(0f, tween(if (reduce) 160 else PushMs, easing = PushEasing))
-        } else if (!state.open && state.pushed) {
-            slide.animateTo(-1f, tween(if (reduce) 160 else PushMs, easing = PushEasing))
+        if (!state.open && state.pushed) {
+            // 下一層的面板蓋在選單上、從選單面板的範圍開始變形：等它畫出來再拿掉選單（不閃）
+            androidx.compose.runtime.withFrameNanos { }
+            androidx.compose.runtime.withFrameNanos { }
             state.clear()
         } else if (state.open) coroutineScope {
             launch { t.animateTo(1f, tween(if (reduce) 200 else OpenMs, easing = LinearEasing)) }
@@ -224,7 +215,7 @@ fun GlassMenuHost(state: MenuState, haze: HazeState, tone: Tone) {
         // 背景遮罩：同步淡入到 40%；點空白處關閉
         Box(
             Modifier.fillMaxSize()
-                .graphicsLayer { alpha = 0.4f * (if (reduce) t.value else e()) * (1f + slide.value) }
+                .graphicsLayer { alpha = 0.4f * (if (reduce) t.value else e()) }
                 .background(Color.Black)
                 .then(if (state.open) Modifier.pointerInput(spec) { detectTapGestures { state.dismiss() } } else Modifier),
         )
@@ -242,6 +233,7 @@ fun GlassMenuHost(state: MenuState, haze: HazeState, tone: Tone) {
                     val fx = (if (left) a.right - geo.panelW else a.left).coerceIn(margin, c.maxWidth - margin - geo.panelW)
                     val fy = (if (geo.up) a.bottom - h else a.top).coerceIn(margin, c.maxHeight - margin - h)
                     geo.final = Rect(fx, fy, fx + geo.panelW, fy + h)
+                    state.panelRect = geo.final
                     val k = e()
                     geo.current = Rect(
                         lerp(a.left, geo.final.left, k), lerp(a.top, geo.final.top, k),
@@ -257,8 +249,7 @@ fun GlassMenuHost(state: MenuState, haze: HazeState, tone: Tone) {
                     shape = RoundedCornerShape(r.coerceAtLeast(0f))
                     clip = true
                     shadowElevation = shadow * k
-                    alpha = (if (reduce) t.value else 1f) * (1f + slide.value * 0.7f)
-                    translationX = if (reduce) 0f else slide.value * size.width * 0.3f
+                    alpha = if (reduce) t.value else 1f
                 }
                 .drawBehind { drawRect(androidx.compose.ui.graphics.lerp(startColor, panelColor, e())) },
         ) {
