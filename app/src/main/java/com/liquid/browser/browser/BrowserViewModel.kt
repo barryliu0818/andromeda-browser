@@ -321,7 +321,10 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         val list = tabs.filter { !it.incognito && !it.isBlank }
         val json = org.json.JSONObject()
             .put("current", list.indexOf(current))
-            .put("tabs", org.json.JSONArray(list.map { org.json.JSONObject().put("url", it.url).put("title", it.title) }))
+            .put("tabs", org.json.JSONArray(list.map { t ->
+                org.json.JSONObject().put("url", t.url).put("title", t.title).put("used", t.lastUsed)
+                    .apply { t.historyState()?.let(::bundleToB64)?.let { put("history", it) } }
+            }))
         runCatching { sessionFile.writeText(json.toString()) }
         // 總覽卡片的縮圖也存起來（JPEG，背景執行緒壓縮），還原後卡片不會一片空白
         val thumbs = list.map { it.thumbnail?.asAndroidBitmap() }
@@ -343,7 +346,10 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         for (i in 0 until arr.length()) {
             val o = arr.getJSONObject(i)
             val u = o.optString("url").takeIf { it.startsWith("http") } ?: continue
-            val tab = Tab(nextId++, false, webContext, this, settings.value.desktopByDefault, settings.value.identifyAsIPhone).apply { restore(u, o.optString("title")) }
+            val tab = Tab(nextId++, false, webContext, this, settings.value.desktopByDefault, settings.value.identifyAsIPhone).apply {
+                restore(u, o.optString("title"), o.optString("history").takeIf { it.isNotEmpty() }?.let(::b64ToBundle))
+                lastUsed = o.optLong("used")
+            }
             tabs.add(tab)
             // 縮圖在背景執行緒解碼（開 App 時不卡主執行緒）
             val file = java.io.File(thumbDir, "$i.jpg")
@@ -354,7 +360,41 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         }
         if (tabs.isEmpty()) return false
         select(tabs[json.optInt("current", 0).coerceIn(0, tabs.lastIndex)])
+        preloadRecent()
         return true
+    }
+
+    /**
+     * 重開 App 後，等目前分頁載完、閒下來，在背景先載入最近用過的另一個分頁（約 20～50MB）：
+     * 從分頁總覽切過去時已經載好，不必重新載入。只預載一個，控制在 50MB 左右的預算內
+     */
+    private fun preloadRecent() = viewModelScope.launch {
+        kotlinx.coroutines.delay(4000)
+        val cur = current ?: return@launch
+        while (cur.progress < 100) kotlinx.coroutines.delay(500)
+        val am = getApplication<Application>().getSystemService(android.app.ActivityManager::class.java)
+        val mem = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+        if (mem.lowMemory) return@launch
+        tabs.filter { it.pending && it != current }.maxByOrNull { it.lastUsed }?.loadPending(sizeLike = cur.webView)
+    }
+
+    // WebView.saveState 的內容存成文字（放進 session.json）；太大的（超過 256KB）不存，還原時只載入網址
+    private fun bundleToB64(b: android.os.Bundle): String? {
+        val p = android.os.Parcel.obtain()
+        return try {
+            p.writeBundle(b)
+            p.marshall().takeIf { it.size <= 256 * 1024 }?.let { android.util.Base64.encodeToString(it, android.util.Base64.NO_WRAP) }
+        } catch (e: Exception) { null } finally { p.recycle() }
+    }
+
+    private fun b64ToBundle(s: String): android.os.Bundle? {
+        val p = android.os.Parcel.obtain()
+        return try {
+            val bytes = android.util.Base64.decode(s, android.util.Base64.NO_WRAP)
+            p.unmarshall(bytes, 0, bytes.size)
+            p.setDataPosition(0)
+            p.readBundle(javaClass.classLoader)
+        } catch (e: Exception) { null } finally { p.recycle() }
     }
 
     /** 分頁總覽拖曳排序：在同模式清單中把 from 移到 to 的位置。 */

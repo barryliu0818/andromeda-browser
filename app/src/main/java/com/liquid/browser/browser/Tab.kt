@@ -445,6 +445,7 @@ class Tab(
 
             override fun onPageFinished(view: WebView, u: String) {
                 title = view.title.orEmpty()
+                if (cacheFirst) { cacheFirst = false; view.settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT }
                 // 這頁之前翻譯過（重新整理、返回時重新載入）：自動再翻一次（譯文走快取，不花 API 額度）
                 if (!translated && u in translatedUrls) listener.onReapplyTranslation(this@Tab)
                 if (legacyInject) view.evaluateJavascript(listener.injectedScript(), null)
@@ -801,6 +802,7 @@ class Tab(
         if (cur.isNullOrEmpty() || cur == "about:blank") {
             val target = pendingUrl ?: url
             pendingUrl = null
+            pendingState = null
             if (target.isNotBlank() && target != "about:blank") load(target) else refreshing = false
         } else {
             webView.stopLoading()
@@ -820,15 +822,48 @@ class Tab(
 
     /** 從上次工作階段還原、還沒載入的網址：第一次切到這個分頁時才載入（重開 App 不會一次載入所有分頁） */
     private var pendingUrl: String? = null
+    /** 還原的上一頁／下一頁紀錄（WebView.saveState 的內容）；載入時連紀錄一起還原 */
+    private var pendingState: android.os.Bundle? = null
+    /** 還原載入時先用快取（不重新下載）；這一頁載完就改回一般模式 */
+    private var cacheFirst = false
+    /** 最後一次切到這個分頁的時間：重開 App 後預先載入最近用過的分頁 */
+    var lastUsed = 0L
+    val pending: Boolean get() = pendingUrl != null
 
-    fun restore(savedUrl: String, savedTitle: String) {
+    fun restore(savedUrl: String, savedTitle: String, state: android.os.Bundle? = null) {
         url = savedUrl
         title = savedTitle
         pendingUrl = savedUrl
+        pendingState = state
+    }
+
+    /** 上一頁紀錄（存工作階段用）：還沒載入的分頁回傳還原時拿到的那份 */
+    fun historyState(): android.os.Bundle? =
+        pendingState ?: if (pending) null else android.os.Bundle().takeIf { runCatching { webView.saveState(it) }.getOrNull() != null }
+
+    /**
+     * 載入還原的網頁：先用快取（看過的網頁幾乎立刻出現、不重新下載），有上一頁紀錄就連紀錄一起還原。
+     * sizeLike：分頁不在畫面上時（背景預先載入）借用這個大小排版，否則要等放上畫面才會載入
+     */
+    fun loadPending(sizeLike: View? = null): Boolean {
+        val u = pendingUrl ?: return false
+        pendingUrl = null
+        val st = pendingState
+        pendingState = null
+        if (webView.width == 0 && sizeLike != null && sizeLike.width > 0) {
+            webView.measure(View.MeasureSpec.makeMeasureSpec(sizeLike.width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(sizeLike.height, View.MeasureSpec.EXACTLY))
+            webView.layout(0, 0, sizeLike.width, sizeLike.height)
+        }
+        cacheFirst = true
+        webView.settings.cacheMode = android.webkit.WebSettings.LOAD_CACHE_ELSE_NETWORK
+        whenSized {
+            if (st == null || runCatching { webView.restoreState(st) }.getOrNull() == null) load(u)
+        }
+        return true
     }
 
     fun setForeground(on: Boolean) {
-        if (on) pendingUrl?.let { pendingUrl = null; load(it) }
+        if (on) { lastUsed = System.currentTimeMillis(); loadPending() }
         // 背景分頁暫停動畫與額外處理，省 CPU 與電量；切回來時恢復。WebView 已銷毀時（分頁剛被關閉或重建）不做事
         runCatching { if (on) webView.onResume() else webView.onPause() }
         // 不開 offscreenPreRaster：會讓渲染程序多佔大量記憶體，小米 HyperOS 等積極回收的系統會因此結束渲染程序
