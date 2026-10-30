@@ -89,9 +89,10 @@ class PageMenuActions(
  * 起始頁沒有網頁：… 直接是資料庫選單。
  */
 fun pageMenu(anchor: Rect, tab: Tab, vm: BrowserViewModel, tone: Tone, context: Context, actions: PageMenuActions) =
-    if (tab.isBlank) libraryMenu(anchor, actions, withReport = true)
+    if (tab.isBlank) libraryMenu(anchor, actions, withReport = true, anchorIcon = "menu")
     else MenuSpec(
         anchor = anchor,
+        anchorIcon = "menu",
         width = 290,
         header = { dismiss -> PageMenuHeader(tab, vm, tone, dismiss) },
         items = listOf(
@@ -112,8 +113,9 @@ fun pageMenu(anchor: Rect, tab: Tab, vm: BrowserViewModel, tone: Tone, context: 
     )
 
 /** 資料庫選單（App 層級）：書籤與歷史紀錄、下載項目、設定；起始頁的 … 另外加上回報問題 */
-fun libraryMenu(anchor: Rect, actions: PageMenuActions, withReport: Boolean = false) = MenuSpec(
+fun libraryMenu(anchor: Rect, actions: PageMenuActions, withReport: Boolean = false, anchorIcon: String? = null) = MenuSpec(
     anchor = anchor,
+    anchorIcon = anchorIcon,
     items = listOf(
         MenuItem(t("書籤與歷史紀錄"), "book") { actions.onLibrary() },
         MenuItem(t("下載項目"), "download") { actions.onDownloads() },
@@ -124,6 +126,7 @@ fun libraryMenu(anchor: Rect, actions: PageMenuActions, withReport: Boolean = fa
 /** 網址列的翻譯鈕（YouTube）：翻譯網頁與翻譯字幕兩項 */
 fun translateMenu(anchor: Rect, tab: Tab, vm: BrowserViewModel) = MenuSpec(
     anchor = anchor,
+    anchorIcon = "translate",
     items = listOf(
         MenuItem(if (tab.translated) t("顯示原文") else t("翻譯網頁"), "translate") { vm.toggleTranslate(tab) },
         MenuItem(if (tab.ytSubs) t("關閉字幕翻譯") else t("翻譯字幕"), "subtitles") { vm.toggleYouTubeSubs(tab) },
