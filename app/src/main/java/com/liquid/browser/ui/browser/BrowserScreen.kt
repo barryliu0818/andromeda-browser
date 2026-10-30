@@ -254,7 +254,7 @@ fun BrowserScreen(vm: BrowserViewModel) {
     // collectLatest：反方向捲動會取消進行中的動畫，從目前位置直接轉向，不會等它跑完
     LaunchedEffect(Unit) {
         snapshotFlow { vm.collapsed }.collectLatest { target ->
-            animate(vm.collapse, if (target) 1f else 0f, animationSpec = if (target) Motion.exit() else Motion.glass()) { v, _ -> vm.collapse = v }
+            animate(vm.collapse, if (target) 1f else 0f, animationSpec = Motion.collapse()) { v, _ -> vm.collapse = v }
         }
     }
 

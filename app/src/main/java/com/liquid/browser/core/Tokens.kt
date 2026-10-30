@@ -49,24 +49,27 @@ object Motion {
         androidx.compose.animation.core.spring(dampingRatio = 1f, stiffness = (2f * Math.PI.toFloat() / response).let { it * it })
     // 透明度、顏色：iOS 的 easeInOut（0.42, 0, 0.58, 1），不用線性
     private val IosEaseInOut = androidx.compose.animation.core.CubicBezierEasing(0.42f, 0f, 0.58f, 1f)
+    // 開關（選單、面板、總覽）：Apple 的 sheet 曲線（iOS 呈現／關閉頁面用的那條）。一開始就是最快的速度、再慢慢停住，
+    // 點下去畫面立刻動。彈簧從靜止起步，前 50ms 只走 13%，會感覺「延遲」，所以開關不用彈簧
+    private val AppleSheet = androidx.compose.animation.core.CubicBezierEasing(0.32f, 0.72f, 0f, 1f)
 
-    /** 一般 UI（response 0.4s） */
-    fun <T> standard(): FiniteAnimationSpec<T> = if (reduced) snap() else iosSpring(0.4f)
+    /** 一般 UI（跟手的位移：彈簧 response 0.3s，中途打斷保留速度） */
+    fun <T> standard(): FiniteAnimationSpec<T> = if (reduced) snap() else iosSpring(0.3f)
 
-    /** 面板、選單進場、放開後歸位（response 0.5s，SwiftUI .smooth） */
-    fun <T> glass(): FiniteAnimationSpec<T> = if (reduced) snap() else iosSpring(0.5f)
+    /** 面板、選單進場（Apple sheet 曲線 400ms） */
+    fun <T> glass(): FiniteAnimationSpec<T> = if (reduced) snap() else androidx.compose.animation.core.tween(400, easing = AppleSheet)
 
-    /** 面板、選單退場（response 0.35s，比進場快，iOS 關閉的節奏） */
-    fun <T> exit(): FiniteAnimationSpec<T> = if (reduced) snap() else iosSpring(0.35f)
+    /** 面板、選單退場（Apple sheet 曲線 280ms，比進場快） */
+    fun <T> exit(): FiniteAnimationSpec<T> = if (reduced) snap() else androidx.compose.animation.core.tween(280, easing = AppleSheet)
 
-    /** 分頁總覽轉場（response 0.35s） */
-    fun <T> overview(): FiniteAnimationSpec<T> = if (reduced) snap() else iosSpring(0.35f)
+    /** 分頁總覽轉場（Apple sheet 曲線 350ms） */
+    fun <T> overview(): FiniteAnimationSpec<T> = if (reduced) snap() else androidx.compose.animation.core.tween(350, easing = AppleSheet)
 
-    /** 網址列收合／展開（response 0.4s） */
-    fun <T> collapse(): FiniteAnimationSpec<T> = if (reduced) snap() else iosSpring(0.4f)
+    /** 網址列滑出／滑回（跟著捲動：彈簧 response 0.3s，反方向捲動時從目前速度轉向） */
+    fun <T> collapse(): FiniteAnimationSpec<T> = if (reduced) snap() else iosSpring(0.3f)
 
-    /** 按下：要立即回饋（response 0.15s） */
-    fun <T> pressIn(): FiniteAnimationSpec<T> = if (reduced) snap() else iosSpring(0.15f)
+    /** 按下：要立即回饋（彈簧 response 0.12s） */
+    fun <T> pressIn(): FiniteAnimationSpec<T> = if (reduced) snap() else iosSpring(0.12f)
 
     /** 淡入淡出、顏色（iOS easeInOut） */
     fun <T> timed(ms: Int = MediumMs): FiniteAnimationSpec<T> = if (reduced) snap() else androidx.compose.animation.core.tween((ms * 1.25f).toInt(), easing = IosEaseInOut)
