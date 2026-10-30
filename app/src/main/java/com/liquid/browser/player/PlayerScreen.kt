@@ -202,6 +202,11 @@ fun PlayerScreen(c: PlayerController, inPip: Boolean, onVideoBounds: (android.gr
         }
     }
 
+    var speedBounds by remember { mutableStateOf(Rect.Zero) }
+    val showSpeed = {
+        menu.show(MenuSpec(speedBounds, Speeds.map { sp -> MenuItem(speedLabel(sp), if (sp == c.speed) "check" else null) { c.setPlaybackSpeed(sp) } }, width = 160))
+    }
+
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         // 影片
         // 沒有原生 backdrop 的手機玻璃不做即時模糊：不必每幀把影片錄進模糊來源
@@ -258,13 +263,13 @@ fun PlayerScreen(c: PlayerController, inPip: Boolean, onVideoBounds: (android.gr
                     // 上下淡漸層：底部有毛玻璃面板，漸層只需讓頂部白字在亮畫面上清楚
                     Box(Modifier.fillMaxWidth().height(120.dp).background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.45f), Color.Transparent))))
                     Box(
-                        Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(140.dp)
-                            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.35f)))),
+                        Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(if (landscape) 160.dp else 140.dp)
+                            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = if (landscape) 0.6f else 0.35f)))),
                     )
 
-                    // 頂部：返回｜標題＋網域｜下載與速度合成一顆玻璃膠囊
+                    // 頂部：返回｜標題＋網域｜（直向）速度；橫向兩側多留一點邊
                     Row(
-                        Modifier.fillMaxWidth().statusBarsPadding().displayCutoutPadding().padding(horizontal = 14.dp, vertical = 10.dp),
+                        Modifier.fillMaxWidth().statusBarsPadding().displayCutoutPadding().padding(horizontal = if (landscape) 20.dp else 14.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
@@ -276,69 +281,91 @@ fun PlayerScreen(c: PlayerController, inPip: Boolean, onVideoBounds: (android.gr
                             val host = c.request.referer?.let { android.net.Uri.parse(it).host?.removePrefix("www.") }
                             if (!host.isNullOrEmpty()) Text(host, color = Color.White.copy(alpha = 0.65f), fontSize = 12.sp, maxLines = 1)
                         }
-                        var speedBounds by remember { mutableStateOf(Rect.Zero) }
-                        PlayerGlass(haze, Modifier.height(44.dp).onGloballyPositioned { speedBounds = it.boundsInRoot() }) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                // 下載這段影片（交給內建多連線下載引擎）
-                                Box(
-                                    Modifier.size(44.dp).clip(CircleShape).clickable(onClickLabel = t("下載影片")) { touch(); onDownload() },
-                                    Alignment.Center,
-                                ) { Sym("download", Color.White, 22.dp) }
-                                Box(Modifier.size(1.dp, 20.dp).background(Color.White.copy(alpha = 0.25f)))
-                                Text(
-                                    speedLabel(c.speed),
-                                    Modifier.clip(CircleShape).clickable(onClickLabel = t("播放速度")) {
-                                        touch()
-                                        menu.show(
-                                            MenuSpec(speedBounds, Speeds.map { sp -> MenuItem(speedLabel(sp), if (sp == c.speed) "check" else null) { c.setPlaybackSpeed(sp) } }, width = 160),
-                                        )
-                                    }.padding(start = 12.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
-                                    color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, style = Tabular,
-                                )
-                            }
+                        // 直向：速度在右上角；橫向放到底部那一列
+                        if (!landscape) PlayerGlass(haze, Modifier.height(44.dp).onGloballyPositioned { speedBounds = it.boundsInRoot() }) {
+                            SpeedButton(c.speed) { touch(); showSpeed() }
                         }
                     }
 
                     // 中央不放按鈕：播放／暫停、快轉倒退全部用手勢（雙擊中間／左右、長按 2 倍速、水平拖動）
 
-                    // 底部：單行半透明窄條（時間｜進度條｜剩餘｜子母畫面｜全螢幕），不模糊，不遮住影片
-                    PlayerGlass(
-                        haze,
-                        Modifier.align(Alignment.BottomCenter).navigationBarsPadding().displayCutoutPadding()
-                            .padding(horizontal = 12.dp, vertical = 10.dp).widthIn(max = 720.dp).fillMaxWidth().height(44.dp),
-                    ) { Row(Modifier.fillMaxSize().padding(start = 14.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        val shown = gesture.scrub?.targetMs ?: (seconds * 1000)
-                        Text(formatTime(shown), color = Color.White, fontSize = 12.sp, style = Tabular)
+                    val shown = gesture.scrub?.targetMs ?: (seconds * 1000)
+                    val seek: @Composable (Modifier) -> Unit = { m ->
                         SeekBar(
                             position = { gesture.scrub?.targetMs ?: position.longValue },
                             buffered = { buffered.longValue },
                             duration = { c.durationMs },
                             onSeek = { c.seekTo(it); touch() },
                             onDragging = touch,
-                            modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
+                            modifier = m,
                         )
-                        Text("-${formatTime((c.durationMs - shown).coerceAtLeast(0))}", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, style = Tabular)
-                        if (android.os.Build.VERSION.SDK_INT >= 26) Box(
-                            Modifier.size(40.dp).clip(CircleShape).clickable(onClickLabel = t("子母畫面")) {
+                    }
+                    if (landscape) {
+                        // 橫向：兩列，直接放在底部漸層上（不加面板，影片露出最多）。
+                        // 上列：整條寬的進度條；下列：左邊播放／暫停＋時間，右邊速度｜下載｜子母畫面｜結束全螢幕（下載在右下角）
+                        Column(
+                            Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().displayCutoutPadding()
+                                .padding(start = 20.dp, end = 20.dp, bottom = 6.dp),
+                        ) {
+                            seek(Modifier.fillMaxWidth())
+                            Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+                                PlayerIcon(if (c.isPlaying) "pause" else "play_arrow", if (c.isPlaying) t("暫停") else t("播放"), size = 30.dp) { c.togglePlay(); touch() }
+                                Text(
+                                    "${formatTime(shown)} / ${formatTime(c.durationMs)}", Modifier.padding(start = 8.dp),
+                                    color = Color.White, fontSize = 14.sp, style = Tabular,
+                                )
+                                Spacer(Modifier.weight(1f))
+                                Box(Modifier.onGloballyPositioned { speedBounds = it.boundsInRoot() }) { SpeedButton(c.speed) { touch(); showSpeed() } }
+                                PlayerIcon("download", t("下載影片")) { touch(); onDownload() }
+                                if (android.os.Build.VERSION.SDK_INT >= 26) PlayerIcon("picture_in_picture_alt", t("子母畫面"), size = 22.dp) {
+                                    runCatching { activity?.enterPictureInPictureMode(android.app.PictureInPictureParams.Builder().build()) }
+                                }
+                                PlayerIcon("fullscreen_exit", t("結束全螢幕"), size = 26.dp) {
+                                    touch()
+                                    activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT
+                                }
+                            }
+                        }
+                    } else {
+                        // 直向：單行半透明窄條（時間｜進度條｜剩餘｜子母畫面｜全螢幕｜下載），不模糊，不遮住影片
+                        PlayerGlass(
+                            haze,
+                            Modifier.align(Alignment.BottomCenter).navigationBarsPadding().displayCutoutPadding()
+                                .padding(horizontal = 12.dp, vertical = 10.dp).widthIn(max = 720.dp).fillMaxWidth().height(44.dp),
+                        ) { Row(Modifier.fillMaxSize().padding(start = 14.dp, end = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(formatTime(shown), color = Color.White, fontSize = 12.sp, style = Tabular)
+                            seek(Modifier.weight(1f).padding(horizontal = 10.dp))
+                            Text("-${formatTime((c.durationMs - shown).coerceAtLeast(0))}", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, style = Tabular)
+                            if (android.os.Build.VERSION.SDK_INT >= 26) PlayerIcon("picture_in_picture_alt", t("子母畫面"), box = 38.dp, size = 20.dp) {
                                 runCatching { activity?.enterPictureInPictureMode(android.app.PictureInPictureParams.Builder().build()) }
-                            },
-                            Alignment.Center,
-                        ) { Sym("picture_in_picture_alt", Color.White, 20.dp) }
-                        Box(
-                            Modifier.size(40.dp).clip(CircleShape).clickable(onClickLabel = if (landscape) t("結束全螢幕") else t("全螢幕")) {
+                            }
+                            PlayerIcon("fullscreen", t("全螢幕"), box = 38.dp) {
                                 touch()
-                                activity?.requestedOrientation =
-                                    if (landscape) ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                            },
-                            Alignment.Center,
-                        ) { Sym(if (landscape) "fullscreen_exit" else "fullscreen", Color.White, 22.dp) }
-                    } }
+                                activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                            }
+                            PlayerIcon("download", t("下載影片"), box = 38.dp) { touch(); onDownload() }
+                        } }
+                    }
                 }
             }
             GlassMenuHost(menu, haze, Tone.InputDark)
         }
     }
 }
+
+/** 播放器的圖示按鈕（圓形點擊範圍） */
+@Composable
+private fun PlayerIcon(icon: String, label: String, box: androidx.compose.ui.unit.Dp = 44.dp, size: androidx.compose.ui.unit.Dp = 24.dp, onClick: () -> Unit) =
+    Box(Modifier.size(box).clip(CircleShape).clickable(onClickLabel = label, onClick = onClick), Alignment.Center) { Sym(icon, Color.White, size) }
+
+/** 播放速度（點了打開速度選單） */
+@Composable
+private fun SpeedButton(speed: Float, onClick: () -> Unit) =
+    Text(
+        speedLabel(speed),
+        Modifier.clip(CircleShape).clickable(onClickLabel = t("播放速度"), onClick = onClick).padding(horizontal = 14.dp, vertical = 12.dp),
+        color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, style = Tabular,
+    )
 
 /** 控制元件的半透明底：不模糊，影片畫面透得過來，維持觀影沉浸感 */
 
