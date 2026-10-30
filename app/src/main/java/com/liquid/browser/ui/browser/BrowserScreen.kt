@@ -246,8 +246,10 @@ fun BrowserScreen(vm: BrowserViewModel) {
     // 底下的網頁跟著整頁重畫（Google 這類圖多的頁面 GPU 每幀約 16ms，只剩 60fps）；靜態圖片幾乎不花 GPU
     var frozen by remember { mutableStateOf<ImageBitmap?>(null) }
     val sheetShown = sheet.content != null
+    // 從選單變形出來的面板不凍結：截圖（擷取整個視窗）那一刻選單還在淡出，會被拍進凍結畫面，
+    // 面板拉下來時看到一個卡在畫面上的假選單。這種面板只在繪製階段變形，底下保留即時網頁
     LaunchedEffect(sheetShown, tab) {
-        if (sheetShown && !tab.isBlank) tab.freezeFrame { if (sheet.content != null) frozen = it } else frozen = null
+        if (sheetShown && !tab.isBlank && sheet.from == null) tab.freezeFrame { if (sheet.content != null) frozen = it } else frozen = null
     }
 
     // 網址列滑出／滑回：滑出用退場曲線（300ms、先慢後快地離開），滑回用進場曲線（450ms、先快後慢地停住）；
