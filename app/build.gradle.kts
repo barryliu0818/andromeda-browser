@@ -22,7 +22,7 @@ android {
     defaultConfig {
         // 原本的簽章金鑰遺失，無法覆蓋手機上的舊版（com.liquid.browser）：新版用另一個套件名稱，兩版並存
         applicationId = "com.liquid.browser.next"
-        manifestPlaceholders["appLabel"] = "Andromeda 新版"
+        manifestPlaceholders["appLabel"] = "Orea"
         minSdk = 26
         targetSdk = 37
         versionCode = 4

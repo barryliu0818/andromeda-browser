@@ -403,7 +403,7 @@ fun SettingsContent(vm: BrowserViewModel, tone: Tone) {
             val context = androidx.compose.ui.platform.LocalContext.current
             val app = remember { runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull().orEmpty() }
             val web = remember { androidx.webkit.WebViewCompat.getCurrentWebViewPackage(context) }
-            GroupRow(0, 2, tone, "Andromeda", leading = { IconTile("info", Color(0xFF5856D6)) }, trailing = { Text(app, color = Palette.Gray, fontSize = 16.sp) })
+            GroupRow(0, 2, tone, "Orea", leading = { IconTile("info", Color(0xFF5856D6)) }, trailing = { Text(app, color = Palette.Gray, fontSize = 16.sp) })
             GroupRow(
                 1, 2, tone, t("瀏覽器核心"), subtitle = t("Chromium（系統自動更新）"),
                 leading = { IconTile("public", Color(0xFF34C759)) },

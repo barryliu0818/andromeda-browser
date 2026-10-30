@@ -1,33 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- App 圖示前景：液態玻璃球（Liquid）。半透明玻璃球＋球內下半部的液體波浪＋氣泡＋左上高光。
-     圖形都在 adaptive icon 安全區（中心直徑 66dp）內，各家桌面裁成圓形／方形都完整。 -->
+<!-- Orea 圖示前景：地平線上升起的太陽（Orea：曙光）。半圓太陽＋上方一道光弧＋兩條地平線。
+     圖形都在 adaptive icon 安全區（中心直徑 66dp）內，各家桌面裁成圓形或方形都完整。 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <!-- 玻璃球本體：淡白半透明 -->
-    <path android:fillColor="#2EFFFFFF"
-        android:pathData="M54,28a26,26 0 1,1 0,52a26,26 0 1,1 0,-52z" />
-    <!-- 球內液體：波浪上緣，裁切在球內 -->
-    <group>
-        <clip-path android:pathData="M54,29.5a24.5,24.5 0 1,1 0,49a24.5,24.5 0 1,1 0,-49z" />
-        <path android:pathData="M26,57C33,51.5 41,51.5 48,56S63,62.5 70,57.5S78,53 82,54.5L82,82L26,82Z">
-            <aapt:attr name="android:fillColor">
-                <gradient android:type="linear" android:startX="54" android:startY="52" android:endX="54" android:endY="80">
-                    <item android:offset="0" android:color="#FFFFFFFF" />
-                    <item android:offset="1" android:color="#FFCFE3FF" />
-                </gradient>
-            </aapt:attr>
-        </path>
-        <!-- 氣泡 -->
-        <path android:fillColor="#FF6FB0FF" android:pathData="M60,66.5a2.6,2.6 0 1,1 0,0.01z" />
-        <path android:fillColor="#FF9CC8FF" android:pathData="M67.5,71.5a1.6,1.6 0 1,1 0,0.01z" />
-        <path android:fillColor="#FF9CC8FF" android:pathData="M48,70.5a1.3,1.3 0 1,1 0,0.01z" />
-    </group>
-    <!-- 玻璃球外框 -->
-    <path android:strokeColor="#F2FFFFFF" android:strokeWidth="3"
-        android:pathData="M54,28a26,26 0 1,1 0,52a26,26 0 1,1 0,-52z" />
-    <!-- 左上高光 -->
-    <path android:strokeColor="#CCFFFFFF" android:strokeWidth="3" android:strokeLineCap="round"
-        android:pathData="M37,47A18.5,18.5 0 0,1 47.5,36" />
+    <!-- 光弧 -->
+    <path android:strokeColor="#80FFFFFF" android:strokeWidth="3.2" android:strokeLineCap="round"
+        android:pathData="M31,58A23,23 0 0,1 77,58" />
+    <!-- 太陽（半圓，白 → 暖杏色） -->
+    <path android:pathData="M39,58A15,15 0 0,1 69,58Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="54" android:startY="43" android:endX="54" android:endY="58">
+                <item android:offset="0" android:color="#FFFFFFFF" />
+                <item android:offset="1" android:color="#FFFFE2B8" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- 地平線 -->
+    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="3.6" android:strokeLineCap="round"
+        android:pathData="M30,63.5H78" />
+    <path android:strokeColor="#99FFFFFF" android:strokeWidth="3.2" android:strokeLineCap="round"
+        android:pathData="M40,71H68" />
 </vector>

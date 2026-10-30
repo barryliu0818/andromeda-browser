@@ -28,7 +28,7 @@ object CrashLog {
             runCatching {
                 file(app).writeText(
                     buildString {
-                        appendLine("Andromeda ${runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull()}")
+                        appendLine("Orea ${runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull()}")
                         appendLine("${Build.MANUFACTURER} ${Build.MODEL}・Android ${Build.VERSION.RELEASE}（API ${Build.VERSION.SDK_INT}）")
                         appendLine(t("執行緒：%1\$s", thread.name))
                         appendLine(e.stackTraceToString())
@@ -46,7 +46,7 @@ object CrashLog {
             .setTitle(t("上次發生閃退"))
             .setMessage(t("可以複製錯誤紀錄回報，方便找出原因。\n\n") + text.take(1500))
             .setPositiveButton(t("複製紀錄")) { _, _ ->
-                activity.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("Andromeda crash", text))
+                activity.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("Orea crash", text))
                 Toast.makeText(activity, t("已複製"), Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton(t("關閉"), null)
@@ -78,7 +78,7 @@ object CrashLog {
         } ?: return null
         BugLog.event("exit", "$reason status=${info.status} importance=${info.importance} ${info.description.orEmpty()}")
         return buildString {
-            appendLine("Andromeda ${runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull()}")
+            appendLine("Orea ${runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull()}")
             appendLine("${Build.MANUFACTURER} ${Build.MODEL}・Android ${Build.VERSION.RELEASE}（API ${Build.VERSION.SDK_INT}）")
             appendLine("$reason・status ${info.status}・importance ${info.importance}")
             appendLine(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(info.timestamp))

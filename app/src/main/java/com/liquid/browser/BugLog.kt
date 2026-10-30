@@ -111,7 +111,7 @@ object BugLog {
                     File(folder, "info.txt").writeText(
                         buildString {
                             appendLine(line("report", "#$n").trim())
-                            appendLine("Andromeda ${runCatching { activity.packageManager.getPackageInfo(activity.packageName, 0).versionName }.getOrNull()}")
+                            appendLine("Orea ${runCatching { activity.packageManager.getPackageInfo(activity.packageName, 0).versionName }.getOrNull()}")
                             appendLine("${Build.MANUFACTURER} ${Build.MODEL}・Android ${Build.VERSION.RELEASE}（API ${Build.VERSION.SDK_INT}）")
                             appendLine()
                             appendLine(state)
