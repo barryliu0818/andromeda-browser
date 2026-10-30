@@ -404,6 +404,7 @@ class Tab(
             }
 
             override fun onPageStarted(view: WebView, u: String, icon: Bitmap?) {
+                pageStartedAt = android.os.SystemClock.uptimeMillis()
                 media.clear()
                 blockedCount = 0
                 pageHost = Uri.parse(u).host.orEmpty()
@@ -428,6 +429,10 @@ class Tab(
                 findMatches = 0
             }
 
+            override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: android.webkit.WebResourceResponse) {
+                if (request.isForMainFrame) com.liquid.browser.BugLog.limited("http", "${response.statusCode} ${request.url}")
+            }
+
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                 if (request.isForMainFrame) {
                     loadFailed = true
@@ -446,6 +451,11 @@ class Tab(
             override fun onPageFinished(view: WebView, u: String) {
                 title = view.title.orEmpty()
                 if (cacheFirst) { cacheFirst = false; view.settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT }
+                if (pageStartedAt > 0) {
+                    val ms = android.os.SystemClock.uptimeMillis() - pageStartedAt
+                    if (ms > 8_000) com.liquid.browser.BugLog.event("slow", "載入 ${ms}ms $u")
+                    pageStartedAt = 0
+                }
                 // 這頁之前翻譯過（重新整理、返回時重新載入）：自動再翻一次（譯文走快取，不花 API 額度）
                 if (!translated && u in translatedUrls) listener.onReapplyTranslation(this@Tab)
                 if (legacyInject) view.evaluateJavascript(listener.injectedScript(), null)
@@ -466,6 +476,12 @@ class Tab(
         }
         webView.webChromeClient = object : WebChromeClient() {
             override fun onProgressChanged(view: WebView, p: Int) { progress = p; if (p == 100) refreshing = false }
+            // 網頁的 JS 錯誤（含我們注入的腳本出錯）：記下來方便查網頁功能失靈
+            override fun onConsoleMessage(m: android.webkit.ConsoleMessage): Boolean {
+                if (m.messageLevel() == android.webkit.ConsoleMessage.MessageLevel.ERROR)
+                    com.liquid.browser.BugLog.limited("js", "${pageHost} ${m.message().take(200)} (${m.sourceId().substringAfterLast('/').take(60)}:${m.lineNumber()})")
+                return false
+            }
             override fun onReceivedTitle(view: WebView, t: String?) { title = t.orEmpty() }
             override fun onReceivedIcon(view: WebView, icon: Bitmap) { favicon = icon.asImageBitmap() }
             override fun onShowCustomView(view: View, callback: CustomViewCallback) = listener.onCustomView(view, callback)
@@ -824,6 +840,7 @@ class Tab(
     private var pendingUrl: String? = null
     /** 還原的上一頁／下一頁紀錄（WebView.saveState 的內容）；載入時連紀錄一起還原 */
     private var pendingState: android.os.Bundle? = null
+    private var pageStartedAt = 0L
     /** 還原載入時先用快取（不重新下載）；這一頁載完就改回一般模式 */
     private var cacheFirst = false
     /** 最後一次切到這個分頁的時間：重開 App 後預先載入最近用過的分頁 */

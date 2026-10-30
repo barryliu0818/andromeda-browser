@@ -19,7 +19,9 @@ import java.util.concurrent.Executors
  *  - events.log：自動記錄的異常（閃退、網頁渲染程序被結束、掉幀、網頁載入失敗、翻譯／下載失敗），超過 512KB 只留後半
  *  - report_編號_時間/：一鍵回報（螢幕截圖、當下狀態、最近的事件與 App 日誌）
  *  - auto_編號_類別_時間/：自動回報，內容同上；類別：freeze（一幀超過 150ms）、anr（主執行緒卡住 2.5 秒，附卡住時的堆疊）、
- *    overlap（總覽／面板／選單／全螢幕開著時網址列模糊視窗還浮在上面）、renderer（網頁渲染程序崩潰）、crash（上次閃退）
+ *    overlap（總覽／面板／選單／全螢幕開著時網址列模糊視窗還浮在上面）、renderer（網頁渲染程序崩潰）、crash（上次閃退）、
+ *    stuck_*（畫面狀態卡住：選單／面板關不掉、總覽轉場沒結束、凍結畫面沒拿掉、輸入時鍵盤沒出來）
+ *  - events.log 另外記：jank（一幀超過 25ms）、js（網頁 JS 錯誤）、http（主頁面 HTTP 錯誤）、slow（網頁載入超過 8 秒）、memory（系統要求釋放記憶體）
  */
 object BugLog {
     private var dir: File? = null
@@ -42,6 +44,19 @@ object BugLog {
     fun event(kind: String, msg: String) {
         val text = line(kind, msg)
         io.execute { runCatching { append(text) } }
+    }
+
+    private var limitWindow = 0L
+    private var limitCount = 0
+
+    /** 量可能很大的事件（網頁 JS 錯誤、HTTP 錯誤）：每分鐘最多 30 筆，超過的丟掉 */
+    fun limited(kind: String, msg: String) {
+        val now = System.currentTimeMillis()
+        synchronized(stamp) {
+            if (now - limitWindow > 60_000) { limitWindow = now; limitCount = 0 }
+            if (++limitCount > 30) return
+        }
+        event(kind, msg)
     }
 
     /** 同步寫入：閃退時程式馬上就要結束，不能交給背景執行緒 */

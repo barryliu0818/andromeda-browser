@@ -160,6 +160,8 @@ class MainActivity : ComponentActivity() {
     @Suppress("DEPRECATION")
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
+        val rt = Runtime.getRuntime()
+        BugLog.event("memory", "trim level=$level javaHeap=${(rt.totalMemory() - rt.freeMemory()) / 1_048_576}MB 分頁=${vm.tabs.size}")
         if (level == TRIM_MEMORY_RUNNING_LOW || level == TRIM_MEMORY_RUNNING_CRITICAL || level >= TRIM_MEMORY_BACKGROUND) {
             com.liquid.browser.ui.glass.BlurPool.clear()
         }

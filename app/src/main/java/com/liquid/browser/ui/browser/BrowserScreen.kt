@@ -449,6 +449,30 @@ fun BrowserScreen(vm: BrowserViewModel) {
     SideEffect { com.liquid.browser.BugLog.state = screenState }
     // 圖層重疊偵測：分頁總覽、面板、選單、影片全螢幕打開後（等進場動畫跑完），網址列的模糊視窗應該都已收起；
     // 還有顯示的就是浮在它們上面（之前發生過的那種重疊），自動回報
+    // 畫面狀態卡住偵測：每 250ms 檢查一次，某個狀態持續超過門檻（動畫早該結束了）就自動回報（截圖＋狀態＋日誌）
+    LaunchedEffect(Unit) {
+        val checks: List<Triple<String, Long, () -> Boolean>> = listOf(
+            Triple("menu", 1_500L) { menu.spec != null && !menu.open },
+            Triple("sheet", 1_500L) { sheet.content != null && !sheet.open },
+            Triple("overview", 2_500L) { ov.active },
+            Triple("overview_leave", 2_000L) { overviewLeaving },
+            Triple("frozen", 1_200L) { frozen != null && sheet.content == null },
+            Triple("keyboard", 1_500L) { focused && androidx.core.view.ViewCompat.getRootWindowInsets(view)?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()) == false },
+        )
+        val since = HashMap<String, Long>()
+        while (true) {
+            delay(250)
+            val now = android.os.SystemClock.uptimeMillis()
+            for ((name, limit, cond) in checks) {
+                if (!runCatching(cond).getOrDefault(false)) { since.remove(name); continue }
+                val s = since.getOrPut(name) { now }
+                if (s > 0 && now - s > limit) {
+                    com.liquid.browser.BugLog.auto("stuck_$name", "$name 狀態持續 ${now - s}ms 沒結束")
+                    since[name] = -1 // 這一次只回報一次，狀態恢復後才重新計時
+                }
+            }
+        }
+    }
     val overlay = when {
         vm.customView != null -> "影片全螢幕"
         overview -> "分頁總覽"
