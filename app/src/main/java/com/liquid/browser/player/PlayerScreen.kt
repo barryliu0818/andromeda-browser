@@ -155,7 +155,7 @@ fun PlayerScreen(c: PlayerController, inPip: Boolean, onVideoBounds: (android.gr
         controller?.hide(WindowInsetsCompat.Type.systemBars())
         onDispose {
             controller?.show(WindowInsetsCompat.Type.systemBars())
-            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            activity?.let(::backToPortrait)
             activity?.window?.attributes = activity?.window?.attributes?.apply { screenBrightness = -1f }
         }
     }
@@ -431,3 +431,20 @@ private fun PlayerGlass(haze: HazeState, modifier: Modifier, onClick: (() -> Uni
     androidx.compose.runtime.CompositionLocalProvider(com.liquid.browser.ui.glass.LocalInBlurWindow provides true) {
         com.liquid.browser.ui.glass.LiquidGlass(haze, Tone.Dark, CircleShape, modifier, systemBlur = false, onClick = onClick, content = content)
     }
+
+/**
+ * 離開播放器：網頁回到直向（即使手機還橫拿著）。等手機真的轉回直向才解除鎖定，之後照常可以轉橫向瀏覽；
+ * 不立刻解除是因為手還橫拿著時，系統會馬上又把網頁轉回橫向
+ */
+private fun backToPortrait(activity: android.app.Activity) {
+    activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT
+    val listener = object : android.view.OrientationEventListener(activity) {
+        override fun onOrientationChanged(deg: Int) {
+            if (deg == ORIENTATION_UNKNOWN || (deg in 30..330)) return
+            disable()
+            if (activity.requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT)
+                activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+    }
+    if (listener.canDetectOrientation()) listener.enable() else activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+}

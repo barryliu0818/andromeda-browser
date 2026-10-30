@@ -68,6 +68,8 @@ class Tab(
         fun onMediaUrl(tab: Tab, url: String, typed: Boolean = false): Boolean
         /** 網頁中 <video> 的「用原生播放器播放」按鈕；from 為影片在視窗中的位置（px） */
         fun onNativeVideo(tab: Tab, src: String, title: String, from: androidx.compose.ui.geometry.Rect?, startMs: Long)
+        /** 網頁影片按全螢幕時改用內建播放器 */
+        fun nativeFullscreen(): Boolean = false
         /** 網頁渲染程序被系統結束（記憶體不足）或崩潰：由 ViewModel 重建分頁，App 不跟著閃退 */
         fun onRendererGone(tab: Tab)
 
@@ -484,7 +486,18 @@ class Tab(
             }
             override fun onReceivedTitle(view: WebView, t: String?) { title = t.orEmpty() }
             override fun onReceivedIcon(view: WebView, icon: Bitmap) { favicon = icon.asImageBitmap() }
-            override fun onShowCustomView(view: View, callback: CustomViewCallback) = listener.onCustomView(view, callback)
+            // 網頁播放器按全螢幕：改用內建播放器（手勢、倍速、下載、子母畫面）。影片網址取自全螢幕的那個 <video>；
+            // 串流網站的 <video> 是 blob:（MSE），改用攔截到的串流網址。找不到能播的網址才用網頁自己的全螢幕
+            override fun onShowCustomView(view: View, callback: CustomViewCallback) {
+                if (!listener.nativeFullscreen()) return listener.onCustomView(view, callback)
+                webView.evaluateJavascript(FULLSCREEN_VIDEO_JS) { r ->
+                    val json = runCatching { org.json.JSONObject(org.json.JSONTokener(r).nextValue() as String) }.getOrNull()
+                    val src = json?.optString("src")?.takeIf { it.startsWith("http") } ?: media.lastOrNull()
+                    if (src == null) return@evaluateJavascript listener.onCustomView(view, callback)
+                    callback.onCustomViewHidden()
+                    listener.onNativeVideo(this@Tab, src, json?.optString("title").orEmpty().ifBlank { title }, null, ((json?.optDouble("time", 0.0) ?: 0.0) * 1000).toLong())
+                }
+            }
             override fun onHideCustomView() = listener.onCustomView(null, null)
 
             // 只接受使用者點擊開的新視窗；新分頁的第一個網址若在廣告清單裡，onAdClickBlocked 會把它關掉
@@ -1087,3 +1100,13 @@ fun isSniffableMedia(url: String): Boolean {
     return path.endsWith(".m3u8") || path.endsWith(".mp4") || path.endsWith(".webm") || path.endsWith(".m4v") ||
         path.endsWith(".mov") || path.endsWith(".mkv") || path.endsWith(".flv")
 }
+
+/** 正在全螢幕（或正在播放）的 <video>：網址、播放位置、標題；同時暫停它（交給內建播放器接著播） */
+private const val FULLSCREEN_VIDEO_JS = """(function(){
+  var f = document.fullscreenElement || document.webkitFullscreenElement;
+  var v = f && (f.tagName === 'VIDEO' ? f : f.querySelector && f.querySelector('video'));
+  if (!v) { var all = Array.prototype.slice.call(document.querySelectorAll('video')); v = all.filter(function(x){ return !x.paused; })[0] || all[0]; }
+  if (!v) return null;
+  try { v.pause(); } catch (e) {}
+  return JSON.stringify({ src: v.currentSrc || v.src || '', time: v.currentTime || 0, title: document.title || '' });
+})()"""

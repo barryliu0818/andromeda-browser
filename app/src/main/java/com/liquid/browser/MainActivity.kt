@@ -147,7 +147,8 @@ class MainActivity : ComponentActivity() {
             CompositionLocalProvider(LocalReduceTransparency provides settings.reduceTransparency) {
                 // testTagsAsResourceId：讓 Macrobenchmark／UiAutomator 能以 testTag 找到元件
                 Box(Modifier.fillMaxSize().semantics { testTagsAsResourceId = true }) {
-                    if (!vm.inPip) BrowserScreen(vm)
+                    // 播放器開著時，瀏覽畫面的系統模糊小視窗（網址列、起始頁的分段鈕）全部收起，否則會浮在播放器上面
+                    if (!vm.inPip) CompositionLocalProvider(com.liquid.browser.ui.glass.LocalHideBlurWindows provides (player != null)) { BrowserScreen(vm) }
                     player?.let { PlayerScreen(it, vm.inPip, onVideoBounds = { r -> vm.videoBounds = r }, onDownload = { vm.downloadVideo(it.request) }, onClose = vm::closePlayer) }
                 }
             }

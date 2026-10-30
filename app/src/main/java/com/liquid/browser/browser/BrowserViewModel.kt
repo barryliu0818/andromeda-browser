@@ -184,6 +184,8 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         runCatching { webContext.startActivity(intent) }.onFailure { showToast(t("無法開啟 App")) }
     }
 
+    override fun nativeFullscreen() = settings.value.nativePlayer
+
     override fun onNativeVideo(tab: Tab, src: String, title: String, from: androidx.compose.ui.geometry.Rect?, startMs: Long) {
         openPlayer(
             PlayerRequest(

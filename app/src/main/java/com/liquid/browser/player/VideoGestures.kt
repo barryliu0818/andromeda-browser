@@ -190,22 +190,8 @@ fun Modifier.videoGestures(state: VideoGestureState, actions: VideoGestureAction
                         actions.seekTo(target)
                         state.scrub = null
                     } else {
-                        // 垂直：左半亮度、右半音量
-                        val kind = if (down.position.x < size.width / 2) LevelKind.Brightness else LevelKind.Volume
-                        var last = first.position.y
-                        while (true) {
-                            val c = awaitPointerEvent().changes.first()
-                            if (!c.pressed) break
-                            c.consume()
-                            val delta = (last - c.position.y) / (size.height * 0.6f)
-                            last = c.position.y
-                            val v = if (kind == LevelKind.Brightness) actions.adjustBrightness(delta) else actions.adjustVolume(delta)
-                            state.level = LevelPreview(kind, v)
-                        }
-                        scope.launch {
-                            delay(500)
-                            state.level = null
-                        }
+                        // 垂直拖動不做事（不調亮度、音量：使用者不要左右兩側的上下手勢）；等手指放開
+                        while (awaitPointerEvent().changes.first().pressed) { }
                     }
                 }
 
