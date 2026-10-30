@@ -290,8 +290,8 @@ fun BrowserScreen(vm: BrowserViewModel) {
     BackHandler(overview) { overview = false }
     BackHandler(finding) { tab.clearFind(); finding = false }
     BackHandler(vm.controlsHidden) { vm.controlsHidden = false }
-    BackHandler(menu.open) { menu.dismiss() }
-    BackHandler(sheet.open) { sheet.dismiss() }
+    BackHandler(menu.open) { menu.back() }
+    BackHandler(sheet.open) { sheet.back() }
     BackHandler(vm.longPress != null) { vm.longPress = null }
     BackHandler(vm.customView != null) { vm.exitFullscreen() }
 
@@ -457,14 +457,14 @@ fun BrowserScreen(vm: BrowserViewModel) {
     val pageActions = PageMenuActions(
         onFind = { finding = true },
         onLibrary = {
-            sheet.show { dismiss ->
+            sheet.show(menu.pushed, menu::restore) { dismiss ->
                 // 從總覽打開的：開了書籤就離開總覽，看得到載入的網頁
                 StartPage(vm, menu, Modifier.fillMaxSize(), initialPage = 1) { url -> tab.load(url); dismiss(); overview = false }
             }
         },
-        onDownloads = { sheet.show { DownloadsContent(menuTone) } },
-        onSiteSettings = { sheet.show { SiteSettings(tab, vm, menuTone) } },
-        onSettings = { sheet.show { SettingsContent(vm, menuTone) } },
+        onDownloads = { sheet.show(menu.pushed, menu::restore) { DownloadsContent(menuTone) } },
+        onSiteSettings = { sheet.show(menu.pushed, menu::restore) { SiteSettings(tab, vm, menuTone) } },
+        onSettings = { sheet.show(menu.pushed, menu::restore) { SettingsContent(vm, menuTone) } },
         onReport = {
             // 等選單退場動畫結束再截圖，截到的是問題畫面本身
             scope.launch {

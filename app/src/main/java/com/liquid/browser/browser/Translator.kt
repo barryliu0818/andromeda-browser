@@ -141,10 +141,12 @@ object Translator {
     /** OpenAI 相容的 Chat Completions（DeepSeek、千問、GLM） */
     private fun llm(texts: List<String>, engine: TranslateEngine, key: String, model: String, target: TargetLang): List<String> =
         try {
-            llmOnce(texts, engine, key, model, target, thinkingOff = true)
+            // 百煉上的 GLM 不接受 enable_thinking=false（HTTP 400、沒有錯誤訊息）：GLM 不送這個參數
+            llmOnce(texts, engine, key, model, target, thinkingOff = engine != TranslateEngine.Glm)
         } catch (e: IOException) {
-            // 有些模型必須思考、不接受關閉：拿掉這個參數再試一次
-            if (e.message?.contains("enable_thinking") == true) llmOnce(texts, engine, key, model, target, thinkingOff = false) else throw e
+            // 其他模型若也不接受關閉思考（400 或訊息提到 enable_thinking）：拿掉這個參數再試一次
+            if (engine != TranslateEngine.Glm && (e.message?.contains("enable_thinking") == true || e.message?.contains("HTTP 400") == true))
+                llmOnce(texts, engine, key, model, target, thinkingOff = false) else throw e
         }
 
     private fun llmOnce(texts: List<String>, engine: TranslateEngine, key: String, model: String, target: TargetLang, thinkingOff: Boolean): List<String> {

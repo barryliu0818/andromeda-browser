@@ -65,6 +65,7 @@ import com.liquid.browser.ui.glass.LiquidGlass
 import com.liquid.browser.ui.glass.MenuDivider
 import com.liquid.browser.ui.glass.MenuItem
 import com.liquid.browser.ui.glass.MenuSpec
+import com.liquid.browser.ui.glass.MenuState
 import com.liquid.browser.ui.glass.Tone
 import dev.chrisbanes.haze.HazeState
 
@@ -94,12 +95,12 @@ fun pageMenu(anchor: Rect, tab: Tab, vm: BrowserViewModel, tone: Tone, context: 
         anchor = anchor,
         anchorIcon = "menu",
         width = 290,
-        header = { dismiss -> PageMenuHeader(tab, vm, tone, dismiss) },
+        header = { m -> PageMenuHeader(tab, vm, tone, m, actions) },
         items = listOf(
             MenuItem(t("在此頁面上尋找"), "search") { actions.onFind() },
             if (tab.desktop) MenuItem(t("要求行動版網站"), "smartphone") { tab.setDesktopMode(false) }
             else MenuItem(t("要求桌面版網站"), "computer") { tab.setDesktopMode(true) },
-            MenuItem(t("網站設定"), "tune") { actions.onSiteSettings() },
+            MenuItem(t("網站設定"), "tune", push = true) { actions.onSiteSettings() },
             MenuItem(t("隱藏控制項"), "unfold_less") {
                 vm.controlsHidden = true
                 val top = vm.settings.value.barLayout == com.liquid.browser.data.BarLayout.Top ||
@@ -108,7 +109,7 @@ fun pageMenu(anchor: Rect, tab: Tab, vm: BrowserViewModel, tone: Tone, context: 
             },
             MenuItem(t("回報問題"), "bug_report") { actions.onReport() },
             // 設定要隨時找得到：不只在分頁總覽的資料庫鈕裡
-            MenuItem(t("設定"), "settings") { actions.onSettings() },
+            MenuItem(t("設定"), "settings", push = true) { actions.onSettings() },
         ),
     )
 
@@ -117,9 +118,9 @@ fun libraryMenu(anchor: Rect, actions: PageMenuActions, withReport: Boolean = fa
     anchor = anchor,
     anchorIcon = anchorIcon,
     items = listOf(
-        MenuItem(t("書籤與歷史紀錄"), "book") { actions.onLibrary() },
-        MenuItem(t("下載項目"), "download") { actions.onDownloads() },
-        MenuItem(t("設定"), "settings") { actions.onSettings() },
+        MenuItem(t("書籤與歷史紀錄"), "book", push = true) { actions.onLibrary() },
+        MenuItem(t("下載項目"), "download", push = true) { actions.onDownloads() },
+        MenuItem(t("設定"), "settings", push = true) { actions.onSettings() },
     ) + if (withReport) listOf(MenuItem(t("回報問題"), "bug_report") { actions.onReport() }) else emptyList(),
 )
 
@@ -134,16 +135,32 @@ fun translateMenu(anchor: Rect, tab: Tab, vm: BrowserViewModel) = MenuSpec(
 )
 
 @Composable
-private fun PageMenuHeader(tab: Tab, vm: BrowserViewModel, tone: Tone, dismiss: () -> Unit) {
+private fun PageMenuHeader(tab: Tab, vm: BrowserViewModel, tone: Tone, menu: MenuState, actions: PageMenuActions) {
     val context = LocalContext.current
+    val dismiss = menu::dismiss
     val bookmarked by remember(tab.url) { vm.isBookmarked(tab.url) }.collectAsState(false)
     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), Arrangement.SpaceBetween) {
+        // 分享、書籤：在選單內推入下一層
         QuickButton("ios_share", t("分享"), tone) {
-            dismiss()
-            share(context, tab.url, tab.title)
+            menu.enter(MenuItem(t("分享"), sub = listOf(
+                MenuItem(t("拷貝連結"), "content_copy") {
+                    (context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                        .setPrimaryClip(android.content.ClipData.newPlainText(tab.title, tab.url))
+                },
+                MenuItem(t("拷貝標題與連結"), "link") {
+                    (context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                        .setPrimaryClip(android.content.ClipData.newPlainText(tab.title, "${tab.title}\n${tab.url}"))
+                },
+                MenuItem(t("分享到其他 App…"), "ios_share") { share(context, tab.url, tab.title) },
+            )))
         }
-        QuickButton(if (bookmarked) "bookmark_added" else "bookmark_add", if (bookmarked) t("已加入") else t("加入書籤"), tone, active = bookmarked) {
-            vm.toggleBookmark(tab)
+        QuickButton(if (bookmarked) "bookmark_added" else "bookmark_add", if (bookmarked) t("已加入") else t("書籤"), tone, active = bookmarked) {
+            menu.enter(MenuItem(t("書籤"), sub = listOf(
+                if (bookmarked) MenuItem(t("移除書籤"), "bookmark_remove", destructive = true) { vm.toggleBookmark(tab) }
+                else MenuItem(t("加入書籤"), "bookmark_add") { vm.toggleBookmark(tab) },
+                MenuItem(t("加入閱讀列表"), "eyeglasses") { vm.addToReadingList(tab) },
+                MenuItem(t("書籤與歷史紀錄"), "book", push = true) { actions.onLibrary() },
+            )))
         }
         QuickButton("eyeglasses", t("閱讀列表"), tone) {
             dismiss()

@@ -1,5 +1,16 @@
 package com.liquid.browser.ui.glass
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
@@ -63,7 +74,11 @@ data class MenuItem(
     val label: String,
     val icon: String? = null,
     val destructive: Boolean = false,
-    val onClick: () -> Unit,
+    /** 打開選單外的下一層（設定、網站設定…）：選單往左推出、那一層從右推入，返回時選單從左推回；不重播變形動畫 */
+    val push: Boolean = false,
+    /** 選單內的下一層：面板內容推入式切換到這些項目（不重播變形動畫） */
+    val sub: List<MenuItem>? = null,
+    val onClick: () -> Unit = {},
 )
 
 @Immutable
@@ -71,27 +86,57 @@ class MenuSpec(
     val anchor: Rect,
     val items: List<MenuItem>,
     val width: Int = 260,
-    val header: (@Composable ColumnScope.(dismiss: () -> Unit) -> Unit)? = null,
+    val header: (@Composable ColumnScope.(menu: MenuState) -> Unit)? = null,
     /** 觸發按鈕的圖示（Container Transform 開始時畫在按鈕位置、前 30% 淡出）；沒有就不畫 */
     val anchorIcon: String? = null,
 )
 
-/** 浮動玻璃選單的狀態；anchor 為觸發元件在 root 座標的範圍，選單從那裡「長出」。 */
+/** 浮動選單的狀態；anchor 為觸發元件在 root 座標的範圍，選單從那裡「長出」。 */
 @Stable
 class MenuState {
     var spec by mutableStateOf<MenuSpec?>(null)
         private set
     var open by mutableStateOf(false)
         private set
+    /** 選單內推入的層（二、三級）；空的就是第一層 */
+    val pages = mutableStateListOf<MenuItem>()
+    /** 選單正被推到選單外的下一層（那一層讀它，決定用推入式進場） */
+    var pushed by mutableStateOf(false)
+        private set
+    internal var returning = false
+    private var last: MenuSpec? = null
 
     fun show(spec: MenuSpec) {
-        this.spec = spec
+        this.spec = spec; last = spec
+        pages.clear(); pushed = false; returning = false
         open = true
     }
 
     /** 已在關閉中再呼叫一次時直接清掉，避免殘留看不見的遮罩擋住點擊 */
     fun dismiss() { if (open) open = false else spec = null }
+
+    /** 推入選單內的下一層 */
+    fun enter(item: MenuItem) { pages.add(item) }
+
+    /** 返回鍵：選單內有下一層就退一層，否則關閉 */
+    fun back() { if (pages.isNotEmpty()) pages.removeAt(pages.lastIndex) else dismiss() }
+
+    internal fun push() { pushed = true; open = false }
+
+    /** 從選單外的下一層返回：選單從左邊推回來，停在離開時那一層（不重播變形） */
+    fun restore() {
+        val l = last ?: return
+        spec = l; pushed = false; returning = true; open = true
+    }
     internal fun clear() { spec = null }
+
+    internal fun click(item: MenuItem) {
+        when {
+            item.sub != null -> enter(item)
+            item.push -> { push(); item.onClick() }
+            else -> { dismiss(); item.onClick() }
+        }
+    }
 }
 
 /** 選單面板的最終外形：20dp 圓角的卡片 */
@@ -100,11 +145,15 @@ private val PanelRadius = 20.dp
 private val Emphasized = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
 private const val OpenMs = 380
 private const val CloseMs = 280
+// 推入／推出（選單內換層、推到選單外的下一層）：iOS 導覽 push 的曲線
+private val PushEasing = CubicBezierEasing(0.32f, 0.72f, 0f, 1f)
+private const val PushMs = 350
 
-/** 版面計算的暫存（排版階段寫、同一次排版的子元件讀；不是 Compose 狀態，不觸發重組） */
+/** 版面計算的暫存（排版階段寫、子元件讀）；內容高度是狀態：換層時高度變了，外層容器要跟著重新排版 */
 private class MenuGeometry {
     var screenW = 0; var screenH = 0
-    var panelW = 0; var contentH = 0
+    var panelW = 0
+    var contentH by mutableIntStateOf(0)
     var current = Rect.Zero; var final = Rect.Zero
     var up = false
 }
@@ -116,6 +165,7 @@ private class MenuGeometry {
  *  - 時序：按鈕圖示在前 30% 淡出；選單項目在 40% 後依序淡入，每項間隔 40ms、帶 8dp 位移；背景遮罩同步淡入到 40%
  *  - 開啟 380ms（emphasized easing）；關閉 280ms 反向播放，面板縮回按鈕原位置與原形狀
  *  - 展開方向朝螢幕空間較大處（按鈕在右下就往左上展開）
+ *  - 二、三級採推入式切換（面板內容左右推、面板高度跟著變），不重播變形
  *  - 系統「移除動畫」開啟時改為單純淡入淡出
  * 位置與大小在排版階段讀、圓角／顏色／透明度在繪製階段讀，動畫期間不重組。
  * 面板是不透明卡片，直接畫在主畫面（不用系統模糊視窗：視窗不能每幀改大小）。
@@ -129,8 +179,18 @@ fun GlassMenuHost(state: MenuState, haze: HazeState, tone: Tone) {
     val t = remember(spec) { Animatable(0f) }
     // 每一項自己的進場進度（0 是頂部快捷列）
     val itemAnim = remember(spec) { List(spec.items.size + 1) { Animatable(0f) } }
+    // 推到選單外下一層的位移：0 = 在原位，-1 = 推到左邊（下一層蓋上來）
+    val slide = remember(spec) { Animatable(0f) }
     LaunchedEffect(spec, state.open) {
-        if (state.open) coroutineScope {
+        if (state.open && state.returning) {
+            // 從下一層返回：已經是面板外形，直接從左邊推回
+            t.snapTo(1f); itemAnim.forEach { it.snapTo(1f) }
+            slide.snapTo(-1f)
+            slide.animateTo(0f, tween(if (reduce) 160 else PushMs, easing = PushEasing))
+        } else if (!state.open && state.pushed) {
+            slide.animateTo(-1f, tween(if (reduce) 160 else PushMs, easing = PushEasing))
+            state.clear()
+        } else if (state.open) coroutineScope {
             launch { t.animateTo(1f, tween(if (reduce) 200 else OpenMs, easing = LinearEasing)) }
             itemAnim.forEachIndexed { i, a ->
                 launch {
@@ -164,7 +224,7 @@ fun GlassMenuHost(state: MenuState, haze: HazeState, tone: Tone) {
         // 背景遮罩：同步淡入到 40%；點空白處關閉
         Box(
             Modifier.fillMaxSize()
-                .graphicsLayer { alpha = 0.4f * (if (reduce) t.value else e()) }
+                .graphicsLayer { alpha = 0.4f * (if (reduce) t.value else e()) * (1f + slide.value) }
                 .background(Color.Black)
                 .then(if (state.open) Modifier.pointerInput(spec) { detectTapGestures { state.dismiss() } } else Modifier),
         )
@@ -197,7 +257,8 @@ fun GlassMenuHost(state: MenuState, haze: HazeState, tone: Tone) {
                     shape = RoundedCornerShape(r.coerceAtLeast(0f))
                     clip = true
                     shadowElevation = shadow * k
-                    alpha = if (reduce) t.value else 1f
+                    alpha = (if (reduce) t.value else 1f) * (1f + slide.value * 0.7f)
+                    translationX = if (reduce) 0f else slide.value * size.width * 0.3f
                 }
                 .drawBehind { drawRect(androidx.compose.ui.graphics.lerp(startColor, panelColor, e())) },
         ) {
@@ -211,17 +272,44 @@ fun GlassMenuHost(state: MenuState, haze: HazeState, tone: Tone) {
                             p.place((geo.final.left - geo.current.left).roundToInt(), (geo.final.top - geo.current.top).roundToInt())
                         }
                     }
-                    .verticalScroll(rememberScrollState())
-                    .padding(vertical = 6.dp),
+                    .verticalScroll(rememberScrollState()),
             ) {
                 val dir = { if (geo.up) 1f else -1f }
-                spec.header?.let { header ->
-                    Column(Modifier.graphicsLayer { val a = itemAnim[0].value; alpha = a; translationY = (1f - a) * rise * dir() }) { header(state::dismiss) }
-                }
-                spec.items.forEachIndexed { i, item ->
-                    MenuRow(item, tone, Modifier.graphicsLayer { val a = itemAnim[i + 1].value; alpha = a; translationY = (1f - a) * rise * dir() }) {
-                        state.dismiss()
-                        item.onClick()
+                // 二、三級：內容左右推入（高度跟著動畫），容器不重播變形
+                AnimatedContent(
+                    state.pages.toList(),
+                    transitionSpec = {
+                        val fwd = targetState.size > initialState.size
+                        val spec2 = tween<IntOffset>(PushMs, easing = PushEasing)
+                        if (reduce) fadeIn(tween(160)) togetherWith fadeOut(tween(160))
+                        else (slideInHorizontally(spec2) { if (fwd) it else -it / 3 } + fadeIn(tween(PushMs / 2)) togetherWith
+                            slideOutHorizontally(spec2) { if (fwd) -it / 3 else it } + fadeOut(tween(PushMs / 2)))
+                            .using(SizeTransform(clip = false) { _, _ -> tween(PushMs, easing = PushEasing) })
+                    },
+                    contentKey = { it.size },
+                    label = "menuPage",
+                ) { pages ->
+                    Column(Modifier.padding(vertical = 6.dp)) {
+                        val page = pages.lastOrNull()
+                        if (page == null) {
+                            spec.header?.let { header ->
+                                Column(Modifier.graphicsLayer { val a = itemAnim[0].value; alpha = a; translationY = (1f - a) * rise * dir() }) { header(state) }
+                            }
+                            spec.items.forEachIndexed { i, item ->
+                                MenuRow(item, tone, Modifier.graphicsLayer { val a = itemAnim[i + 1].value; alpha = a; translationY = (1f - a) * rise * dir() }) { state.click(item) }
+                            }
+                        } else {
+                            // 下一層的標題列：‹ 標題（點了退回上一層）
+                            Row(
+                                Modifier.fillMaxWidth().clickable { state.back() }.padding(horizontal = 12.dp).height(46.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Sym("arrow_back_ios_new", tone.content, 18.dp)
+                                Text(page.label, Modifier.padding(start = 8.dp), color = tone.content, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                            }
+                            MenuDivider(tone)
+                            page.sub.orEmpty().forEach { item -> MenuRow(item, tone, Modifier) { state.click(item) } }
+                        }
                     }
                 }
             }

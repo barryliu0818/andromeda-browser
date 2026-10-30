@@ -56,13 +56,22 @@ class SheetState {
     var open by mutableStateOf(false)
         private set
 
-    fun show(content: @Composable (dismiss: () -> Unit) -> Unit) {
+    /** 從選單推入的下一層：從右邊滑入、往右推出（不是從下面升起）；不能往下拖曳關閉，返回鍵退回選單 */
+    var push by mutableStateOf(false)
+        private set
+    private var onPop: (() -> Unit)? = null
+
+    fun show(push: Boolean = false, onPop: (() -> Unit)? = null, content: @Composable (dismiss: () -> Unit) -> Unit) {
         this.content = content
+        this.push = push; this.onPop = if (push) onPop else null
         open = true
     }
 
     /** 已在關閉中（例如收起動畫被打斷）再呼叫一次時直接清掉，避免殘留一層看不見的遮罩 */
-    fun dismiss() { if (open) open = false else content = null }
+    fun dismiss() { onPop = null; if (open) open = false else content = null }
+
+    /** 返回鍵：從選單推入的這一層退回選單，其他直接關閉 */
+    fun back() { val p = onPop; dismiss(); p?.invoke() }
     internal fun clear() { content = null }
 
     internal var anim: Animatable<Float, androidx.compose.animation.core.AnimationVector1D>? = null
@@ -150,14 +159,13 @@ fun GlassSheetHost(state: SheetState, haze: HazeState, tone: Tone) {
         // 位移在 graphicsLayer（繪製階段），滑動時不重新排版
         Box(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(with(LocalDensity.current) { h.toDp() })
-                .graphicsLayer { translationY = hidden.value * h }
+                .graphicsLayer { if (state.push) translationX = hidden.value * size.width else translationY = hidden.value * h }
                 .clip(SheetShape).background(sheetBg)
-                .nestedScroll(nested)
-                .draggable(
+                .then(if (state.push) Modifier else Modifier.nestedScroll(nested).draggable(
                     rememberDraggableState { d -> scope.launch { hidden.snapTo((hidden.value + d / h).coerceIn(0f, 1f)) } },
                     Orientation.Vertical,
                     onDragStopped = { v -> settle(v) },
-                ),
+                )),
         ) {
             // 滑動期間把面板內容畫成一張快取圖層（約一個面板大小的 GPU 記憶體，停下就釋放）：
             // 每幀只要平移這張圖，不必重畫每張卡片與文字；面板視窗裡沒有 WebView，可以安全離屏
