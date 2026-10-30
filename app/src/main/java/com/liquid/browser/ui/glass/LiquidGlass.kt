@@ -280,6 +280,8 @@ fun LiquidGlass(
     dimBehind: (() -> Float)? = null,
     /** 點到系統模糊視窗外面（用 dimBehind 時主畫面收不到這次點擊） */
     onOutside: (() -> Unit)? = null,
+    /** 玻璃整體的不透明度（系統模糊視窗時連背後的模糊一起淡；主畫面的玻璃用 graphicsLayer） */
+    windowAlpha: (() -> Float)? = null,
     onClick: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit,
 ) {
@@ -312,7 +314,7 @@ fun LiquidGlass(
     else CompositionLocalProvider(LocalInBlurWindow provides true) {
         glass(track.then(if (ready) Modifier.graphicsLayer { alpha = 0f } else Modifier))
     }
-    BlurBoxWindow({ place.origin }, { place.size }, cornerPx, { place.push = it }, { ready = true }, shiftY, dimBehind, onOutside) {
+    BlurBoxWindow({ place.origin }, { place.size }, cornerPx, { place.push = it }, { ready = true }, shiftY, dimBehind, onOutside, windowAlpha) {
         // 視窗外框已依佔位大小排版（狀態），內容填滿即可；不能讀 place.size（非狀態，內容變短時會停在舊尺寸）
         glass(Modifier.fillMaxSize())
     }

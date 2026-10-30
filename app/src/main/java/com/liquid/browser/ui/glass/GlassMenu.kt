@@ -126,6 +126,8 @@ fun GlassMenuHost(state: MenuState, haze: HazeState, tone: Tone) {
                     Modifier.onPlaced { cardPos = it.positionInRoot(); cardSize = it.size },
                     contentAlignment = Alignment.TopStart,
                     shiftY = { (1f - progress.value) * slide * (if (above()) 1f else -1f) },
+                    // 關閉時玻璃連同背後的模糊一起淡出（之前只有內容淡出，玻璃停在畫面上 280ms 再一下子消失，看起來像延遲）
+                    windowAlpha = { if (state.open) 1f else progress.value.coerceIn(0f, 1f) },
                 ) {
                     Column(
                         Modifier.verticalScroll(rememberScrollState()).padding(vertical = 6.dp).graphicsLayer {

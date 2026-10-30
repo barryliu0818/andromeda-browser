@@ -286,6 +286,8 @@ internal fun BlurBoxWindow(
     shiftY: (() -> Float)? = null,
     dimBehind: (() -> Float)? = null,
     onOutside: (() -> Unit)? = null,
+    /** 整個視窗（含背後的模糊）的不透明度：關閉時玻璃跟著淡出，不會停在畫面上再突然消失 */
+    windowAlpha: (() -> Float)? = null,
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
@@ -322,6 +324,16 @@ internal fun BlurBoxWindow(
     // 平移整個視窗內容（RenderThread 層級，不經 WindowManager）；模糊區域由系統跟著畫面位置更新
     if (shiftY != null) androidx.compose.runtime.LaunchedEffect(win) {
         androidx.compose.runtime.snapshotFlow { shiftY() }.collect { win.decor.translationY = it }
+    }
+    if (windowAlpha != null) androidx.compose.runtime.LaunchedEffect(win) {
+        try {
+            androidx.compose.runtime.snapshotFlow { windowAlpha() }.collect { a ->
+                win.window?.let { w -> val lp = w.attributes; if (lp.alpha != a) { lp.alpha = a.coerceIn(0f, 1f); w.attributes = lp } }
+            }
+        } finally {
+            // 還給池子前恢復不透明，下一個使用者不會拿到半透明的視窗
+            win.window?.let { w -> val lp = w.attributes; if (lp.alpha != 1f) { lp.alpha = 1f; w.attributes = lp } }
+        }
     }
     if (dimBehind != null) androidx.compose.runtime.LaunchedEffect(win) {
         androidx.compose.runtime.snapshotFlow { dimBehind() }.collect { win.window?.setDimAmount(it.coerceIn(0f, 1f)) }
