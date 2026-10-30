@@ -175,11 +175,12 @@ fun GlassMenuHost(state: MenuState, haze: HazeState, tone: Tone) {
     val t = remember(spec) { Animatable(0f) }
     // 每一項自己的進場進度（0 是頂部快捷列）
     val itemAnim = remember(spec) { List(spec.items.size + 1) { Animatable(0f) } }
+    // 變形成下一層時，選單整個淡出（前 30%：舊內容淡出、新內容淡入，Material 的 fade through）
+    val fade = remember(spec) { Animatable(1f) }
     LaunchedEffect(spec, state.open) {
         if (!state.open && state.pushed) {
-            // 下一層的面板蓋在選單上、從選單面板的範圍開始變形：等它畫出來再拿掉選單（不閃）
-            androidx.compose.runtime.withFrameNanos { }
-            androidx.compose.runtime.withFrameNanos { }
+            // 下一層的面板在選單底下、從選單面板的範圍開始變形；選單疊在上面淡出（舊內容不會瞬間消失）
+            fade.animateTo(0f, tween(if (reduce) 0 else (OpenMs * 0.3f).toInt(), easing = LinearEasing))
             state.clear()
         } else if (state.open) coroutineScope {
             launch { t.animateTo(1f, tween(if (reduce) 200 else OpenMs, easing = LinearEasing)) }
@@ -215,7 +216,8 @@ fun GlassMenuHost(state: MenuState, haze: HazeState, tone: Tone) {
         // 背景遮罩：同步淡入到 40%；點空白處關閉
         Box(
             Modifier.fillMaxSize()
-                .graphicsLayer { alpha = 0.4f * (if (reduce) t.value else e()) }
+                // 變形成下一層時遮罩交給下一層（它從 40% 接手），這裡立刻拿掉，避免疊兩層
+                .graphicsLayer { alpha = if (state.pushed) 0f else 0.4f * (if (reduce) t.value else e()) }
                 .background(Color.Black)
                 .then(if (state.open) Modifier.pointerInput(spec) { detectTapGestures { state.dismiss() } } else Modifier),
         )
@@ -249,7 +251,7 @@ fun GlassMenuHost(state: MenuState, haze: HazeState, tone: Tone) {
                     shape = RoundedCornerShape(r.coerceAtLeast(0f))
                     clip = true
                     shadowElevation = shadow * k
-                    alpha = if (reduce) t.value else 1f
+                    alpha = (if (reduce) t.value else 1f) * fade.value
                 }
                 .drawBehind { drawRect(androidx.compose.ui.graphics.lerp(startColor, panelColor, e())) },
         ) {

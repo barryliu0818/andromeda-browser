@@ -297,6 +297,8 @@ fun BrowserScreen(vm: BrowserViewModel) {
 
     // 分頁總覽的 shared element 轉場：網頁縮成卡片飛到網格中的位置；點卡片反向放大；新分頁從＋長出
     // 先非同步擷取縮圖（PixelCopy，約 1 幀），拿到後才開始轉場，飛行卡片一開始就有畫面、不會卡頓
+    // 從總覽回到分頁的轉場進行中：網頁先在總覽底下顯示、畫好
+    var overviewLeaving by remember { mutableStateOf(false) }
     val enterOverview: (Rect?) -> Unit = { from ->
         haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
         tab.snapshot {
@@ -329,10 +331,16 @@ fun BrowserScreen(vm: BrowserViewModel) {
             ov.active = true
             scope.launch {
                 ov.progress.snapTo(1f)
-                ov.progress.animateTo(0f, Motion.overview())
+                // 先切到目標分頁：網頁在總覽底下接上、排版、畫好（被總覽蓋住看不到）。
+                // 以前等動畫結束才切，網頁在飛行卡片消失的同一幀才接上畫面，看得到它重新排版
                 if (target != null) vm.select(target) else vm.newTab()
+                overviewLeaving = true
+                ov.progress.animateTo(0f, Motion.overview())
+                // 網頁真的畫出一幀後才拿掉總覽與飛行卡片（最多等 300ms），換回即時網頁時不閃、不跳
+                vm.current?.takeIf { !it.isBlank }?.let { awaitDrawn(it.webView) }
                 overview = false
                 ov.active = false
+                overviewLeaving = false
             }
         }
         // 擋住底下瀏覽畫面的觸控
@@ -582,7 +590,8 @@ fun BrowserScreen(vm: BrowserViewModel) {
                                     factory = { tab.webView.also { (it.parent as? ViewGroup)?.removeView(it) } },
                                     modifier = Modifier.fillMaxSize(),
                                     // 分頁總覽蓋住、或面板滑動中（改顯示凍結畫面）時不畫網頁；INVISIBLE 保留版面，回來不必重新排版
-                                    update = { it.visibility = if (overview || frozen != null) android.view.View.INVISIBLE else android.view.View.VISIBLE },
+                                    // 從總覽回到分頁的動畫期間就顯示（在總覽底下先畫好）
+                                    update = { it.visibility = if ((overview && !overviewLeaving) || frozen != null) android.view.View.INVISIBLE else android.view.View.VISIBLE },
                                 )
                                 frozen?.let { Image(it, null, Modifier.fillMaxWidth(), alignment = Alignment.TopStart, contentScale = ContentScale.FillWidth) }
                                 PullIndicator(tab, Modifier.align(Alignment.TopCenter))
@@ -779,7 +788,7 @@ fun BrowserScreen(vm: BrowserViewModel) {
                 if (classic) { if (finding) FindBar(tab, haze, menuTone) { finding = false } }
                 else if (!PlatformBackdrop && crossBlur) {
                     var glass by remember { mutableStateOf(emptyList<Rect>()) }
-                    SystemBlurWindow(Dimens.Control, regions = { glass.map { it.translate(swipe.value, 0f) } }, inline = !sysBlur || overview || sheet.open || menu.spec != null || vm.customView != null) { toMain ->
+                    SystemBlurWindow(Dimens.Control, regions = { glass.map { it.translate(swipe.value, 0f) } }, inline = !sysBlur || overview || sheet.content != null || menu.spec != null || vm.customView != null) { toMain ->
                         // 只有視窗裡那份回報玻璃範圍：主畫面那份（輸入中）收起前最後一幀是動畫中途的尺寸，會蓋掉正確值
                         val inWindow = com.liquid.browser.ui.glass.LocalInBlurWindow.current
                         controlsRow(toMain) { if (inWindow) glass = it }
@@ -876,9 +885,10 @@ fun BrowserScreen(vm: BrowserViewModel) {
 
             // 分頁總覽：跟首頁同一套（沒有原生 backdrop 時用 Material 3 表面）
             overviewLayer?.let { layer -> androidx.compose.runtime.CompositionLocalProvider(LocalOpaqueGlass provides false, LocalCheapGlass provides !PlatformBackdrop) { layer() } }
-            // 選單與面板畫在總覽之上：總覽的資料庫鈕打開的選單、面板（書籤、下載、設定）關掉後回到總覽
-            GlassMenuHost(menu, haze, menuTone)
+            // 選單與面板畫在總覽之上：總覽的資料庫鈕打開的選單、面板（書籤、下載、設定）關掉後回到總覽。
+            // 選單在面板之上：面板裡（書籤）長按開的選單看得到；選單變形成面板時，選單疊在上面淡出
             GlassSheetHost(sheet, haze, menuTone)
+            GlassMenuHost(menu, haze, menuTone)
 
             // 網頁影片全螢幕：隱藏系統列、允許旋轉
             vm.customView?.let { fullscreen ->
@@ -973,4 +983,16 @@ private fun PullIndicator(tab: com.liquid.browser.browser.Tab, modifier: Modifie
     ) {
         com.liquid.browser.ui.Sym("refresh", if (armed || tab.refreshing) com.liquid.browser.ui.accent else Palette.Gray, 22.dp)
     } }
+}
+
+/** 等 WebView 把目前的網頁真的畫出一幀（最多 300ms）：之後再拿掉蓋在上面的截圖，換成即時網頁時不閃 */
+private suspend fun awaitDrawn(webView: android.webkit.WebView) {
+    kotlinx.coroutines.withTimeoutOrNull(300) {
+        kotlinx.coroutines.suspendCancellableCoroutine<Unit> { c ->
+            if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.VISUAL_STATE_CALLBACK))
+                androidx.webkit.WebViewCompat.postVisualStateCallback(webView, 0) { if (c.isActive) c.resume(Unit) {} }
+            else c.resume(Unit) {}
+        }
+    }
+    androidx.compose.runtime.withFrameNanos { }
 }
