@@ -41,32 +41,35 @@ object Motion {
     /** 系統「移除動畫」開啟時為 true：所有動畫改為立即完成（由 MainActivity 依系統設定更新） */
     @Volatile var reduced = false
 
-    // 緩慢漸進：曲線動畫（不用彈簧），沒有「一下子跳出來、蹦回去」的感覺
-    // 進場：強調減速（先快後慢、緩緩停住）；退場：強調加速（先慢後快、平滑離開）
-    private val EnterEase = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
-    private val ExitEase = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)
-    private val Smooth = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0f, 0f, 1f)
+    // iOS 原生動畫：位移、縮放、面板一律用「臨界阻尼彈簧」（SwiftUI .smooth＝bounce 0），不用固定時長的曲線：
+    //  - 自然減速停住、不回彈（沒有「蹦一下」）
+    //  - 動畫中途被打斷（再點一次、反方向捲動）時，從「目前的速度」接著轉向，不會急停再重來——iOS 順的主因
+    // 以 iOS 的 response（約等於完成時間）換算：stiffness = (2π / response)²，dampingRatio = 1
+    private fun <T> iosSpring(response: Float): FiniteAnimationSpec<T> =
+        androidx.compose.animation.core.spring(dampingRatio = 1f, stiffness = (2f * Math.PI.toFloat() / response).let { it * it })
+    // 透明度、顏色：iOS 的 easeInOut（0.42, 0, 0.58, 1），不用線性
+    private val IosEaseInOut = androidx.compose.animation.core.CubicBezierEasing(0.42f, 0f, 0.58f, 1f)
 
-    /** 一般 UI */
-    fun <T> standard(): FiniteAnimationSpec<T> = if (reduced) snap() else androidx.compose.animation.core.tween(380, easing = Smooth)
+    /** 一般 UI（response 0.4s） */
+    fun <T> standard(): FiniteAnimationSpec<T> = if (reduced) snap() else iosSpring(0.4f)
 
-    /** 面板、選單進場、放開後歸位 */
-    fun <T> glass(): FiniteAnimationSpec<T> = if (reduced) snap() else androidx.compose.animation.core.tween(450, easing = EnterEase)
+    /** 面板、選單進場、放開後歸位（response 0.5s，SwiftUI .smooth） */
+    fun <T> glass(): FiniteAnimationSpec<T> = if (reduced) snap() else iosSpring(0.5f)
 
-    /** 面板、選單退場 */
-    fun <T> exit(): FiniteAnimationSpec<T> = if (reduced) snap() else androidx.compose.animation.core.tween(300, easing = ExitEase)
+    /** 面板、選單退場（response 0.35s，比進場快，iOS 關閉的節奏） */
+    fun <T> exit(): FiniteAnimationSpec<T> = if (reduced) snap() else iosSpring(0.35f)
 
-    /** 分頁總覽轉場 */
-    fun <T> overview(): FiniteAnimationSpec<T> = if (reduced) snap() else androidx.compose.animation.core.tween(300, easing = EnterEase)
+    /** 分頁總覽轉場（response 0.35s） */
+    fun <T> overview(): FiniteAnimationSpec<T> = if (reduced) snap() else iosSpring(0.35f)
 
-    /** 網址列收合／展開 */
-    fun <T> collapse(): FiniteAnimationSpec<T> = if (reduced) snap() else androidx.compose.animation.core.tween(340, easing = Smooth)
+    /** 網址列收合／展開（response 0.4s） */
+    fun <T> collapse(): FiniteAnimationSpec<T> = if (reduced) snap() else iosSpring(0.4f)
 
-    /** 按下：要立即回饋 */
-    fun <T> pressIn(): FiniteAnimationSpec<T> = if (reduced) snap() else androidx.compose.animation.core.tween(110, easing = Smooth)
+    /** 按下：要立即回饋（response 0.15s） */
+    fun <T> pressIn(): FiniteAnimationSpec<T> = if (reduced) snap() else iosSpring(0.15f)
 
-    /** 淡入淡出、顏色 */
-    fun <T> timed(ms: Int = MediumMs): FiniteAnimationSpec<T> = if (reduced) snap() else androidx.compose.animation.core.tween((ms * 1.25f).toInt(), easing = Smooth)
+    /** 淡入淡出、顏色（iOS easeInOut） */
+    fun <T> timed(ms: Int = MediumMs): FiniteAnimationSpec<T> = if (reduced) snap() else androidx.compose.animation.core.tween((ms * 1.25f).toInt(), easing = IosEaseInOut)
 }
 
 object GlassTokens {

@@ -106,24 +106,43 @@ fun GlassMenuHost(state: MenuState, haze: HazeState, tone: Tone) {
                 .then(if (state.open) Modifier.pointerInput(spec) { detectTapGestures { state.dismiss() } } else Modifier),
         )
         var cardPos by remember(spec) { mutableStateOf(Offset.Zero) }
-        val slide = with(androidx.compose.ui.platform.LocalDensity.current) { 16.dp.toPx() }
+        var cardSize by remember(spec) { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        val slide = with(density) { 16.dp.toPx() }
+        val rise = with(density) { 10.dp.toPx() }
+        // 選單在按鈕上方（從下往上長）還是下方
+        val above = { spec.anchor.center.y > cardPos.y }
         Layout(
             content = {
-                // 選單本體：LiquidGlass 在沒有原生 backdrop 的手機上會放進系統模糊視窗（HyperOS 控制中心同一套）
+                // 選單本體：LiquidGlass 在沒有原生 backdrop 的手機上會放進系統模糊視窗（HyperOS 控制中心同一套）。
+                // 系統模糊視窗只能整塊位移、不能縮放（每幀改視窗大小很貴），所以玻璃朝按鈕方向輕輕滑入，
+                // 動感放在玻璃裡的內容：
+                //  - 從按鈕長出來：內容以「最靠近按鈕的角落」為原點，從 90% 放大到 100%
+                //  - 逐行浮現：每行間隔約 30ms 淡入並往上（或往下）滑 10dp 到定位，像一道波
+                //  - 收起較快、較單純：整體縮到 96% 同時淡出，不逐行
+                // 全部是減速曲線、不回彈；只改 graphicsLayer（繪製階段），不重新排版
                 LiquidGlass(
                     haze, tone, MenuShape,
-                    Modifier
-                        .onPlaced { cardPos = it.positionInRoot() },
+                    Modifier.onPlaced { cardPos = it.positionInRoot(); cardSize = it.size },
                     contentAlignment = Alignment.TopStart,
-                    // 不用縮放彈出：朝按鈕方向輕輕滑入（選單在按鈕上方就從下往上），內容逐行淡入
-                    shiftY = { (1f - progress.value) * slide * (if (spec.anchor.center.y > cardPos.y) 1f else -1f) },
+                    shiftY = { (1f - progress.value) * slide * (if (above()) 1f else -1f) },
                 ) {
-                    Column(Modifier.verticalScroll(rememberScrollState()).padding(vertical = 6.dp)) {
+                    Column(
+                        Modifier.verticalScroll(rememberScrollState()).padding(vertical = 6.dp).graphicsLayer {
+                            val p = progress.value.coerceIn(0f, 1f)
+                            val s = if (state.open) androidx.compose.ui.util.lerp(0.9f, 1f, p) else androidx.compose.ui.util.lerp(0.96f, 1f, p)
+                            scaleX = s; scaleY = s
+                            val px = if (cardSize.width > 0) ((spec.anchor.center.x - cardPos.x) / cardSize.width).coerceIn(0f, 1f) else 0.5f
+                            transformOrigin = TransformOrigin(px, if (above()) 1f else 0f)
+                            if (!state.open) alpha = ((p - 0.15f) / 0.6f).coerceIn(0f, 1f)
+                        },
+                    ) {
+                        val dir = { if (above()) 1f else -1f }
                         spec.header?.let { header ->
-                            Column(Modifier.graphicsLayer { alpha = stagger(progress.value, 0) }) { header(state::dismiss) }
+                            Column(Modifier.graphicsLayer { val a = stagger(progress.value, 0, state.open); alpha = a; translationY = (1f - a) * rise * dir() }) { header(state::dismiss) }
                         }
                         spec.items.forEachIndexed { i, item ->
-                            MenuRow(item, tone, Modifier.graphicsLayer { alpha = stagger(progress.value, i + 1) }) {
+                            MenuRow(item, tone, Modifier.graphicsLayer { val a = stagger(progress.value, i + 1, state.open); alpha = a; translationY = (1f - a) * rise * dir() }) {
                                 state.dismiss()
                                 item.onClick()
                             }
@@ -147,8 +166,9 @@ fun GlassMenuHost(state: MenuState, haze: HazeState, tone: Tone) {
     }
 }
 
-/** 第 i 個項目的淡入進度：每項延遲一點點。 */
-private fun stagger(p: Float, i: Int) = ((p - 0.15f - i * 0.03f) / 0.3f).coerceIn(0f, 1f)
+/** 第 i 個項目的進場進度：每項晚一點點（打開時逐行；收起時不逐行，由整體淡出處理） */
+private fun stagger(p: Float, i: Int, opening: Boolean) =
+    if (!opening) 1f else ((p - 0.08f - i * 0.035f) / 0.4f).coerceIn(0f, 1f)
 
 @Composable
 private fun MenuRow(item: MenuItem, tone: Tone, modifier: Modifier, onClick: () -> Unit) {
