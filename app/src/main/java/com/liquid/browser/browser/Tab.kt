@@ -106,6 +106,8 @@ class Tab(
 
         /** 點擊時趁機開的彈出視窗被擋下 */
         fun onPopupBlocked(tab: Tab)
+        /** 點擊開出來的彈窗第一頁是廣告網站：關掉這個分頁、回到原本的網頁 */
+        fun onPopupAd(tab: Tab, url: String)
 
         /** 網頁點擊開的新視窗（window.open／target=_blank）：開成新分頁並記住來源頁，回傳新分頁 */
         fun onPopup(opener: Tab): Tab
@@ -153,6 +155,8 @@ class Tab(
     private var shieldsHandler: ScriptHandler? = null
     /** HTTPS 升級後的網址（連不上時退回 http 用） */
     private var upgraded: String? = null
+    /** 網頁點擊開出來的彈窗分頁：第一個網址是廣告網站就關掉（onPageStarted） */
+    var popupCheck = false
 
     /** 防指紋腳本（Brave 式防追蹤開關改變時重新註冊；無痕分頁也套用） */
     fun applyShields(on: Boolean) {
@@ -371,28 +375,14 @@ class Tab(
                     listener.onExtensionOffer(this@Tab, request.url.toString())
                     return true
                 }
-                // 跳轉阻擋：頁面沒被點擊就自己跳到別的網站（伺服器轉址除外）
+                // 跳轉阻擋（照 Brave：只看目的地是不是廣告／追蹤網站，不看「是不是點連結」）：
+                // 以前點按鈕跳到別的網站（登入、付款）、載入後網頁自己轉址都一律擋，正常功能也被擋掉
                 val target = request.url.host.orEmpty()
-                if (listener.blockRedirects() && !request.hasGesture() && !request.isRedirect && !isBlank && progress >= 100 && pageHost.isNotEmpty() &&
-                    target.isNotEmpty() && baseDomain(target) != baseDomain(pageHost)
+                if (target.isNotEmpty() && !isBlank && pageHost.isNotEmpty() && baseDomain(target) != baseDomain(pageHost) &&
+                    (listener.blockRedirects() || blocksTrackers(pageHost)) && AdBlocker.isAdNavigation(request.url.toString(), pageHost)
                 ) {
-                    listener.onRedirectBlocked(this@Tab, request.url.toString())
-                    return true
-                }
-                // 點擊廣告跳轉：點的不是連結（影片、播放鍵、空白處），網頁卻趁這次點擊把整頁換到別的網站 → 擋下
-                // 只套用在已經載入過、使用者真的在上面點擊的頁面：彈出視窗剛開的新分頁（about:blank、還沒有網域）不算
-                if (listener.blockRedirects() && request.hasGesture() && !request.isRedirect && !isBlank && pageHost.isNotEmpty() &&
-                    target.isNotEmpty() && baseDomain(target) != baseDomain(pageHost)
-                ) {
-                    val hit = view.hitTestResult.type
-                    if (hit != WebView.HitTestResult.SRC_ANCHOR_TYPE && hit != WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE) {
-                        listener.onAdClickBlocked(this@Tab, request.url.toString())
-                        return true
-                    }
-                }
-                // 點到廣告：要跳去的網站在廣告清單裡就攔下，原頁面不動（覆蓋在播放鍵上的透明廣告連結）
-                if (target.isNotEmpty() && !isBlank && blocksTrackers(pageHost) && AdBlocker.blocks(target) && baseDomain(target) != baseDomain(pageHost)) {
-                    listener.onAdClickBlocked(this@Tab, request.url.toString())
+                    if (request.hasGesture()) listener.onAdClickBlocked(this@Tab, request.url.toString())
+                    else listener.onRedirectBlocked(this@Tab, request.url.toString())
                     return true
                 }
                 if (isMediaUrl(request.url.toString()) && listener.onMediaUrl(this@Tab, request.url.toString())) return true
@@ -442,6 +432,12 @@ class Tab(
             }
 
             override fun onPageStarted(view: WebView, u: String, icon: Bitmap?) {
+                // 點擊開出來的彈窗：第一個真正的網址（about:blank 之後）是廣告網站就關掉
+                if (popupCheck && u.startsWith("http")) {
+                    popupCheck = false
+                    val from = opener?.pageHost.orEmpty()
+                    if (AdBlocker.isAdNavigation(u, from)) { view.stopLoading(); listener.onPopupAd(this@Tab, u); return }
+                }
                 pageStartedAt = android.os.SystemClock.uptimeMillis()
                 media.clear()
                 blockedCount = 0
@@ -555,15 +551,11 @@ class Tab(
 
             // 只接受使用者點擊開的新視窗；新分頁的第一個網址若在廣告清單裡，onAdClickBlocked 會把它關掉
             override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message): Boolean {
+                // 沒有點擊就開的彈窗一律不開（同 Chrome／Brave）；有點擊的照開（登入、付款視窗常是按鈕開的），
+                // 開出來的第一頁是廣告網站才關掉（見 onPageStarted 的 popupCheck）
                 if (!isUserGesture) return false
-                // 彈窗廣告：點的不是連結（影片、按鈕、空白處），網頁卻趁這次點擊開新視窗 → 擋掉，原頁面不動
-                val hit = view.hitTestResult.type
-                val onLink = hit == WebView.HitTestResult.SRC_ANCHOR_TYPE || hit == WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE
-                if (!onLink && listener.blockRedirects()) {
-                    listener.onPopupBlocked(this@Tab)
-                    return false
-                }
                 val popup = listener.onPopup(this@Tab)
+                popup.popupCheck = true
                 (resultMsg.obj as? WebView.WebViewTransport)?.webView = popup.webView
                 resultMsg.sendToTarget()
                 return true
@@ -582,6 +574,9 @@ class Tab(
             touchX = e.x
             touchY = e.y
             touching = e.actionMasked != android.view.MotionEvent.ACTION_UP && e.actionMasked != android.view.MotionEvent.ACTION_CANCEL
+            // 手指按下時把 Android 的焦點交給 WebView：放在 Compose 裡的 WebView，在網址列、面板等 Compose 元件拿過焦點後，
+            // 點網頁輸入框不會自己拿回焦點（網頁裡已經 focus，但系統不知道要給哪個 View 鍵盤），Google 搜尋框點了不出鍵盤
+            if (e.actionMasked == android.view.MotionEvent.ACTION_DOWN && !webView.hasFocus()) webView.requestFocus()
             trackPull(e)
             false
         }

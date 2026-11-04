@@ -749,6 +749,13 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         }
     }
 
+    override fun onPopupAd(tab: Tab, url: String) {
+        showToast(t("已擋下彈出廣告"))
+        val opener = tab.opener?.takeIf { it in tabs }
+        if (tab in tabs) close(tab)
+        opener?.let { select(it); it.unblockLastTap() }
+    }
+
     override fun onPopupBlocked(tab: Tab) {
         if (tab == current) showToast(t("已阻擋彈出視窗"))
         tab.unblockLastTap()

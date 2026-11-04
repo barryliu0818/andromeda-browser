@@ -103,6 +103,19 @@ object AdBlocker {
         if (engineReady) AdEngine.nativeCheck(url, "https://$pageHost/", type) == 1
         else host.isNotEmpty() && blocks(host) && baseDomain(host) != baseDomain(pageHost)
 
+    /**
+     * 整頁跳轉／彈窗的目的地是不是廣告網站（跳轉阻擋、彈窗阻擋用；照 Brave 只看清單，不看是不是點連結）：
+     * 網域清單＋原生引擎的 $popup 規則（EasyList 的彈出式廣告規則）；一般規則不拿來比對整頁（路徑剛好像廣告的正常網頁會被誤擋）
+     */
+    fun isAdNavigation(url: String, pageHost: String): Boolean {
+        val host = runCatching { android.net.Uri.parse(url).host }.getOrNull().orEmpty()
+        if (host.isEmpty()) return false
+        if (blocks(host)) return true
+        if (!engineReady) return false
+        val source = "https://${pageHost.ifEmpty { host }}/"
+        return runCatching { AdEngine.nativeCheck(url, source, "popup") == 1 }.getOrDefault(false)
+    }
+
     /** 請求的資源類型（Adblock 規則的 $script、$image… 選項用）：優先看 Sec-Fetch-Dest，其次 Accept 與副檔名 */
     fun resourceType(r: android.webkit.WebResourceRequest): String {
         when (r.requestHeaders["Sec-Fetch-Dest"]) {

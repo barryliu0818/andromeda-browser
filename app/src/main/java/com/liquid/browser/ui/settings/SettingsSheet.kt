@@ -355,7 +355,7 @@ fun SettingsContent(vm: BrowserViewModel, tone: Tone) {
             }
         }
         item {
-            GroupToggle(1, 5, tone, t("阻止自動跳轉"), s.blockRedirects, subtitle = t("網頁未經點擊就跳到其他網站時阻擋"), leading = { IconTile("alt_route", Color(0xFFFF9500)) }) { v ->
+            GroupToggle(1, 5, tone, t("阻止自動跳轉"), s.blockRedirects, subtitle = t("跳到廣告網站、彈出式廣告時阻擋"), leading = { IconTile("alt_route", Color(0xFFFF9500)) }) { v ->
                 vm.updateSettings { it.copy(blockRedirects = v) }
             }
         }

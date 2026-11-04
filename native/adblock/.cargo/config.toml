@@ -1,0 +1,6 @@
+# Android 15+ 的 16 KB 記憶體分頁裝置：.so 的 LOAD 區段要對齊 16 KB（否則系統顯示相容性警告，未來的手機會拒絕載入）
+[target.aarch64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+
+[target.x86_64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
