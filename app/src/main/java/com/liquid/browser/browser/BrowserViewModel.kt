@@ -306,6 +306,8 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     fun select(tab: Tab) {
         // 分頁可能已經關閉或被重建（渲染程序被系統回收時換成新的 Tab）：舊的參照不能再用（WebView 已銷毀，呼叫會閃退）
         if (current == tab || tab !in tabs) return
+        // 換分頁（含外部 App 開網址開出新分頁）時離開上一個分頁的影片全螢幕，否則全螢幕畫面會蓋住新分頁
+        if (customView != null) exitFullscreen()
         val prev = current
         prev?.snapshot()
         prev?.setForeground(false)

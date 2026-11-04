@@ -92,11 +92,12 @@
     if (f) {
       unfill();
       last = f.tagName === 'VIDEO' ? f : f.querySelector('video');
+      // 全螢幕看這部時，網頁上其他還在播的影片（廣告預覽、另一部）一起暫停：同時解碼好幾部影片會讓全螢幕播放卡頓。
+      // 全螢幕的是 iframe（嵌入的播放器）時 last 為 null：這一層的影片全部暫停，iframe 裡的自己處理
+      Array.prototype.forEach.call(document.querySelectorAll('video'), function (o) { if (o !== last && !o.paused) try { o.pause(); } catch (e) {} });
       if (last) {
         if (f !== last) { fill(f, last); hideSiteControls(f, last); }
         last.dispatchEvent(new Event('webkitbeginfullscreen'));
-        // 全螢幕看這部時，網頁上其他還在播的影片（廣告預覽、另一部）一起暫停：同時解碼好幾部影片會讓全螢幕播放卡頓
-        Array.prototype.forEach.call(document.querySelectorAll('video'), function (o) { if (o !== last && !o.paused) try { o.pause(); } catch (e) {} });
       }
     } else {
       unfill();
