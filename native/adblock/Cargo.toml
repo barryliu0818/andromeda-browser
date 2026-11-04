@@ -1,0 +1,23 @@
+# Orea 廣告攔截引擎：Brave 的 adblock-rust（MPL-2.0）包成 Android JNI 程式庫 liboreaadblock.so
+# 編譯：bash scripts/build-adblock.sh（產物放到 app/src/main/jniLibs）
+[package]
+name = "oreaadblock"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# 關掉預設的 single-thread：WebView 會從多個網路執行緒同時查詢
+adblock = { version = "0.13.5", default-features = false, features = ["embedded-domain-resolver", "full-regex-handling"] }
+jni = "0.21.1"
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

@@ -13,8 +13,8 @@ import com.norman.webviewup.lib.WebViewReplace
  * 用 WebViewUpgrade（app/src/main/java/com/norman/webviewup，Apache-2.0）把這個 App 行程裡 WebView 的底層換成 [PKG]，
  * 其他程式碼照樣用 android.webkit.WebView，功能不用改。必須在建立任何 WebView 之前呼叫 [install]；切換要重開 App 才生效。
  *
- * 防護：換核心前先記「嘗試中」，開起來撐過 [SAFE_MS] 才清掉。上次開到一半就掛（旗標還在）→ 這次退回系統 WebView 並記錄，
- * 不會因為核心壞掉而一直閃退。
+ * 防護：換核心前先記「嘗試中」，第一個網頁載入完成（[markHealthy]）或撐過 [SAFE_MS] 才清掉。上次開到一半就掛（旗標還在）
+ * → 這次退回系統 WebView 並記錄，不會因為核心壞掉而一直閃退。（只等計時器的話，剛打開就滑掉 App 也會被誤判成閃退）
  */
 object Engine {
     const val PKG = "com.liquid.orea.webview"
@@ -36,6 +36,15 @@ object Engine {
     /** Orea 核心的版本；沒安裝回傳 null */
     fun installedVersion(ctx: Context): String? =
         runCatching { ctx.packageManager.getPackageInfo(PKG, 0).versionName }.getOrNull()
+
+    @Volatile private var healthy = false
+
+    /** 核心已經正常載入過網頁：清掉「嘗試中」（每次啟動只寫一次） */
+    fun markHealthy(ctx: Context) {
+        if (healthy) return
+        healthy = true
+        prefs(ctx).edit().putBoolean("trying", false).apply()
+    }
 
     fun install(ctx: Context) {
         val p = prefs(ctx)

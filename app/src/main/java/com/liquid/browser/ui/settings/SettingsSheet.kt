@@ -335,7 +335,8 @@ fun SettingsContent(vm: BrowserViewModel, tone: Tone) {
         // 隱私與安全
         item { GroupHeader(t("隱私與安全"), tone) }
         item {
-            GroupToggle(0, 4, tone, t("阻擋廣告與追蹤"), s.adBlock, subtitle = t("類似 AdGuard 的過濾清單・%1\$s 條規則", "%,d".format(AdBlocker.ruleCount)), leading = { IconTile("block", red) }) { v ->
+            GroupToggle(0, 4, tone, t("阻擋廣告與追蹤"), s.adBlock, subtitle = if (AdBlocker.usingEngine) t("Brave 攔截引擎（EasyList 等清單）・%1\$s 條規則", "%,d".format(AdBlocker.ruleCount))
+                else t("類似 AdGuard 的過濾清單・%1\$s 條規則", "%,d".format(AdBlocker.ruleCount)), leading = { IconTile("block", red) }) { v ->
                 vm.updateSettings { it.copy(adBlock = v) }
             }
         }

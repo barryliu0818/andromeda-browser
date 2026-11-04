@@ -12,46 +12,142 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * 廣告／追蹤阻擋（類似 AdGuard 的 DNS 層過濾）：比對請求的網域（含上層網域）是否在阻擋清單中。
- *  - 內建精簡清單（assets/adblock_builtin.txt），離線也有效；
- *  - 開啟後下載 AdGuard DNS 過濾清單（約 5 萬條，jsDelivr 鏡像，中國也能下載），每 7 天更新；
- *  - 清單裡的例外規則（@@||網域^）不阻擋。
- * 比對在 WebView 的網路執行緒上進行：用 HashSet 查網域與各層上層網域，成本是常數時間。
+ * 廣告／追蹤阻擋，兩層：
+ *  - Brave 的 adblock-rust（[AdEngine]）：EasyList＋EasyPrivacy＋EasyList China＋AdGuard DNS 清單，完整語法（路徑規則、資源類型、
+ *    第三方、例外，以及各網站專屬的元素隱藏）。解析好的引擎存成二進位快取，下次啟動數十毫秒就載入。
+ *  - 網域比對（原本的 DNS 層過濾）：內建精簡清單（assets/adblock_builtin.txt）＋AdGuard DNS 清單。原生引擎載入失敗時的備援，
+ *    也用來攔「點廣告跳轉」（[blocks]）。
+ * 清單每 7 天更新；查詢都在 WebView 的網路執行緒上進行。
  */
 object AdBlocker {
-    private val urls = listOf(
-        "https://cdn.jsdelivr.net/gh/AdguardTeam/AdGuardSDNSFilter@gh-pages/Filters/filter.txt",
-        "https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt",
+    /** 清單檔名 → 下載網址（依序嘗試） */
+    private val lists = linkedMapOf(
+        "adguard_filter.txt" to listOf(
+            "https://cdn.jsdelivr.net/gh/AdguardTeam/AdGuardSDNSFilter@gh-pages/Filters/filter.txt",
+            "https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt",
+        ),
+        "easylist.txt" to listOf("https://easylist.to/easylist/easylist.txt"),
+        "easyprivacy.txt" to listOf("https://easylist.to/easylist/easyprivacy.txt"),
+        "easylistchina.txt" to listOf("https://easylist-downloads.adblockplus.org/easylistchina.txt"),
     )
+    /** 引擎快取檔名帶 adblock-rust 版本：升級原生程式庫後舊快取格式不符，自動用清單重建 */
+    private const val ENGINE_FILE = "adblock_engine_0.13.5.bin"
     private const val MAX_AGE_MS = 7L * 24 * 3600 * 1000
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     @Volatile private var blocked: Set<String> = emptySet()
     @Volatile private var allowed: Set<String> = emptySet()
     @Volatile private var loaded = false
+    /** 原生引擎已載入清單（否則用網域比對） */
+    @Volatile private var engineReady = false
+    @Volatile private var engineRules = 0
 
     /** 清單規則數（設定頁顯示用） */
-    val ruleCount: Int get() = blocked.size
+    val ruleCount: Int get() = if (engineReady) engineRules else blocked.size
+    val usingEngine: Boolean get() = engineReady
 
-    /** 載入內建清單與快取的完整清單；快取太舊或不存在就背景下載 */
+    /** 載入內建清單與快取的清單、引擎快取；清單太舊或不存在就背景下載後重建 */
     fun init(context: Context) {
         if (loaded) return
         loaded = true
         val app = context.applicationContext
         scope.launch {
-            val cache = File(app.filesDir, "adguard_filter.txt")
             val builtin = app.assets.open("adblock_builtin.txt").bufferedReader().readLines()
-            apply(builtin + (if (cache.exists()) cache.readLines() else emptyList()))
-            if (!cache.exists() || System.currentTimeMillis() - cache.lastModified() > MAX_AGE_MS) {
-                download()?.let { text ->
-                    cache.writeText(text)
-                    apply(builtin + text.lines())
-                }
+            val files = lists.keys.map { File(app.filesDir, it) }
+            fun adguard() = File(app.filesDir, "adguard_filter.txt").takeIf { it.exists() }?.readLines().orEmpty()
+            apply(builtin + adguard())
+            if (AdEngine.available) {
+                val bin = File(app.filesDir, ENGINE_FILE)
+                val newestList = files.filter { it.exists() }.maxOfOrNull { it.lastModified() } ?: 0L
+                val cached = bin.exists() && bin.lastModified() >= newestList &&
+                    runCatching { AdEngine.nativeLoad(bin.readBytes()) }.getOrDefault(false)
+                if (cached) {
+                    engineRules = app.getSharedPreferences("adblock", Context.MODE_PRIVATE).getInt("rules", 0)
+                    engineReady = true
+                } else if (files.any { it.exists() }) build(app, builtin, files)
+            }
+            var changed = false
+            for ((name, urls) in lists) {
+                val f = File(app.filesDir, name)
+                if (f.exists() && System.currentTimeMillis() - f.lastModified() <= MAX_AGE_MS) continue
+                download(urls)?.let { f.writeText(it); changed = true }
+            }
+            if (changed) {
+                apply(builtin + adguard())
+                if (AdEngine.available) build(app, builtin, files)
             }
         }
     }
 
-    private fun download(): String? = urls.firstNotNullOfOrNull { u ->
+    /** 所有清單接在一起交給原生引擎解析，存成二進位快取 */
+    private fun build(app: Context, builtin: List<String>, files: List<File>) {
+        val started = android.os.SystemClock.uptimeMillis()
+        val text = buildString {
+            // 內建清單是一行一個網域：轉成 Adblock 語法的網域規則
+            builtin.forEach { if (it.isNotBlank() && !it.startsWith("#")) append("||").append(it.trim()).append("^\n") }
+            files.filter { it.exists() }.forEach { append(it.readText()).append('\n') }
+        }
+        if (!runCatching { AdEngine.nativeBuild(text) }.getOrDefault(false)) return
+        engineRules = text.lineSequence().count { it.isNotBlank() && !it.startsWith("!") && !it.startsWith("[") }
+        engineReady = true
+        app.getSharedPreferences("adblock", Context.MODE_PRIVATE).edit().putInt("rules", engineRules).apply()
+        runCatching { AdEngine.nativeSerialize()?.let { File(app.filesDir, ENGINE_FILE).writeBytes(it) } }
+        com.liquid.browser.BugLog.event("adblock", "引擎重建 $engineRules 條規則，${android.os.SystemClock.uptimeMillis() - started}ms")
+    }
+
+    /**
+     * 子資源請求是否阻擋（WebView 網路執行緒）。原生引擎：完整規則比對；備援：網域在清單內且不是網站自己的網域。
+     * [type] 見 [resourceType]。
+     */
+    fun blocksRequest(url: String, host: String, pageHost: String, type: String): Boolean =
+        if (engineReady) AdEngine.nativeCheck(url, "https://$pageHost/", type) == 1
+        else host.isNotEmpty() && blocks(host) && baseDomain(host) != baseDomain(pageHost)
+
+    /** 請求的資源類型（Adblock 規則的 $script、$image… 選項用）：優先看 Sec-Fetch-Dest，其次 Accept 與副檔名 */
+    fun resourceType(r: android.webkit.WebResourceRequest): String {
+        when (r.requestHeaders["Sec-Fetch-Dest"]) {
+            "script" -> return "script"
+            "style" -> return "stylesheet"
+            "image" -> return "image"
+            "iframe", "frame" -> return "sub_frame"
+            "font" -> return "font"
+            "video", "audio", "track" -> return "media"
+            "empty" -> return "xmlhttprequest"
+        }
+        val accept = r.requestHeaders["Accept"].orEmpty()
+        val path = r.url.path.orEmpty().lowercase()
+        return when {
+            accept.startsWith("text/css") || path.endsWith(".css") -> "stylesheet"
+            accept.startsWith("image/") || IMAGE.containsMatchIn(path) -> "image"
+            accept.startsWith("text/html") -> "sub_frame"
+            path.endsWith(".js") || path.endsWith(".mjs") -> "script"
+            FONT.containsMatchIn(path) -> "font"
+            MEDIA.containsMatchIn(path) -> "media"
+            else -> "other"
+        }
+    }
+    private val IMAGE = Regex("\\.(png|jpe?g|gif|webp|svg|avif|ico|bmp)$")
+    private val FONT = Regex("\\.(woff2?|ttf|otf|eot)$")
+    private val MEDIA = Regex("\\.(mp4|webm|m3u8|mpd|ts|m4s|mp3|aac|ogg)$")
+
+    /**
+     * 頁面開始載入時注入的元素隱藏：網站專屬規則（原生引擎）＋常見廣告版位（[COSMETIC_JS]，網站有 $generichide 例外時不加）。
+     * 每個選擇器各自一條 CSS 規則：清單裡偶有瀏覽器不支援的選擇器，合在一起會讓整條規則失效。
+     */
+    fun cosmeticJs(url: String): String {
+        if (!engineReady) return COSMETIC_JS
+        val res = runCatching { org.json.JSONObject(AdEngine.nativeCosmetic(url)) }.getOrNull() ?: return COSMETIC_JS
+        val selectors = res.optJSONArray("hide_selectors")?.let { a -> List(a.length()) { a.getString(it) } }.orEmpty()
+        val css = selectors.joinToString("") { "$it{display:none!important}" }
+        return buildString {
+            if (!res.optBoolean("generichide")) append(COSMETIC_JS)
+            if (css.isNotEmpty()) append("(function(){var s=document.createElement('style');s.textContent=")
+                .append(org.json.JSONObject.quote(css)).append(";(document.head||document.documentElement).appendChild(s)})();")
+            res.optString("injected_script").takeIf { it.isNotBlank() }?.let { append("try{").append(it).append("}catch(e){}") }
+        }
+    }
+
+    private fun download(urls: List<String>): String? = urls.firstNotNullOfOrNull { u ->
         runCatching {
             val conn = (URL(u).openConnection() as HttpURLConnection).apply { connectTimeout = 15_000; readTimeout = 30_000 }
             try { if (conn.responseCode == 200) conn.inputStream.bufferedReader().readText().takeIf { it.length > 10_000 } else null } finally { conn.disconnect() }

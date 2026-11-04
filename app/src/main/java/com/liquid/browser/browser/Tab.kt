@@ -380,11 +380,10 @@ class Tab(
             // IDM 式影片嗅探：只觀察、不攔截。網頁播放器（含 blob:／hls.js、iframe 內）實際請求的影片網址都會被記下
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): android.webkit.WebResourceResponse? {
                 val u = request.url.toString()
-                // 廣告／追蹤阻擋：子資源的網域在清單內就回空內容
+                // 廣告／追蹤阻擋：子資源符合清單就回空內容（Brave 引擎完整比對；沒有引擎時只比對網域）
                 if (!request.isForMainFrame) {
-                    val host = request.url.host.orEmpty()
                     val page = pageHost
-                    if (host.isNotEmpty() && blocksTrackers(page) && AdBlocker.blocks(host) && baseDomain(host) != baseDomain(page)) {
+                    if (blocksTrackers(page) && AdBlocker.blocksRequest(u, request.url.host.orEmpty(), page, AdBlocker.resourceType(request))) {
                         main.post { blockedCount++ }
                         return AdBlocker.emptyResponse()
                     }
@@ -416,7 +415,7 @@ class Tab(
                     view.loadUrl(u)
                     return
                 }
-                if (listener.adBlockFor(pageHost)) view.evaluateJavascript(AdBlocker.COSMETIC_JS, null)
+                if (listener.adBlockFor(pageHost)) view.evaluateJavascript(AdBlocker.cosmeticJs(u), null)
                 translated = false
                 trTarget = null
                 trSent = 0
@@ -451,6 +450,7 @@ class Tab(
             }
 
             override fun onPageFinished(view: WebView, u: String) {
+                com.liquid.browser.core.Engine.markHealthy(view.context)
                 title = view.title.orEmpty()
                 if (cacheFirst) { cacheFirst = false; view.settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT }
                 if (pageStartedAt > 0) {
