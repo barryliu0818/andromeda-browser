@@ -513,7 +513,12 @@ fun BrowserScreen(vm: BrowserViewModel) {
         onDownloads = { sheet.show(if (menu.pushed) menu.panelRect else null, menu.spec?.anchor) { DownloadsContent(menuTone) } },
         onSiteSettings = { sheet.show(if (menu.pushed) menu.panelRect else null, menu.spec?.anchor) { SiteSettings(tab, vm, menuTone) } },
         onSettings = { sheet.show(if (menu.pushed) menu.panelRect else null, menu.spec?.anchor) { SettingsContent(vm, menuTone) } },
-        onExtensions = { sheet.show(if (menu.pushed) menu.panelRect else null, menu.spec?.anchor) { com.liquid.browser.ui.extensions.ExtensionsPanel(vm, menuTone) } },
+        onExtensions = {
+            sheet.show(if (menu.pushed) menu.panelRect else null, menu.spec?.anchor) { dismiss ->
+                // 前往擴充功能商店：開新分頁、收起面板
+                com.liquid.browser.ui.extensions.ExtensionsPanel(vm, menuTone) { url -> vm.newTab(url); dismiss() }
+            }
+        },
     )
     LaunchedEffect(libraryAt) {
         libraryAt?.let { menu.show(libraryMenu(it, pageActions)) }

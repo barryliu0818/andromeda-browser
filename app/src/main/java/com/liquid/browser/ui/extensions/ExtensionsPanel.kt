@@ -42,13 +42,33 @@ import com.liquid.browser.ui.accent
 import com.liquid.browser.ui.glass.Tone
 import com.liquid.browser.ui.groupItem
 
-/** 擴展工具管理（頁面選單 ≡ 裡）：已安裝的擴充功能（開關、移除）＋從網址安裝 */
+/** 擴充功能商店：名稱、網址、圖示、顏色 */
+private val Stores = listOf(
+    listOf("Chrome 線上應用程式商店", "https://chromewebstore.google.com/", "storefront", "0xFF4285F4"),
+    listOf("Firefox 附加元件", "https://addons.mozilla.org/zh-TW/firefox/extensions/", "extension", "0xFFFF7139"),
+    listOf("Greasy Fork（使用者腳本）", "https://greasyfork.org/zh-TW", "code", "0xFF34C759"),
+)
+
+/**
+ * 擴展工具管理（頁面選單 ≡ 裡）：前往擴充功能商店、已安裝的擴充功能（開關、移除）、從網址安裝。
+ * 商店的擴充功能頁面一打開，底部就會問要不要安裝（Tab.onPageFinished → Extensions.packageUrl）
+ */
 @Composable
-fun ExtensionsPanel(vm: BrowserViewModel, tone: Tone) {
+fun ExtensionsPanel(vm: BrowserViewModel, tone: Tone, onOpenStore: (String) -> Unit) {
     val accent = accent
     val exts = Extensions.list.toList()
     LazyColumn(Modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 48.dp)) {
         item { PageTitle(t("擴展工具管理"), tone, Modifier.padding(start = 4.dp)) }
+        item { GroupHeader(t("擴充功能商店"), tone) }
+        itemsIndexed(Stores, key = { _, s -> "store:" + s[1] }) { i, (name, url, icon, color) ->
+            GroupRow(
+                i, Stores.size, tone, t(name),
+                leading = { IconTile(icon, Color(color.removePrefix("0x").toLong(16))) },
+                trailing = { com.liquid.browser.ui.Chevron() },
+                onClick = { onOpenStore(url) },
+            )
+        }
+        item { GroupFooter(t("在商店打開擴充功能的頁面，底部會問要不要安裝到 Orea")) }
         item { GroupHeader(if (exts.isEmpty()) t("還沒有安裝擴充功能") else t("已安裝"), tone) }
         itemsIndexed(exts, key = { _, e -> "ext:" + e.id }) { i, e ->
             val kind = if (e.userScript) t("使用者腳本") else if (e.manifest.has("browser_specific_settings") || e.manifest.has("applications")) "Firefox" else "Chrome"

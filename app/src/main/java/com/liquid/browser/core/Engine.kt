@@ -70,6 +70,8 @@ object Engine {
     }
 
     fun install(ctx: Context) {
+        // 同一個行程裡畫面重建（MainActivity 又 onCreate 一次）：核心已經換好，不能也不必再換（WebView 已初始化會丟例外）
+        if (active.isNotEmpty()) return
         val p = prefs(ctx)
         val pkg = runCatching { ctx.packageManager.getPackageInfo(PKG, 0) }.getOrNull()
         val bundled = bundledVersion(ctx)

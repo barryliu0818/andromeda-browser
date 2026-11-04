@@ -491,6 +491,8 @@ class Tab(
             }
 
             override fun doUpdateVisitedHistory(view: WebView, u: String, isReload: Boolean) {
+                // Chrome 線上應用程式商店、Firefox 附加元件商店是單頁應用程式：在商店裡點進擴充功能只改網址、不重新載入頁面
+                if (!incognito && u != url && Extensions.packageUrl(u) != null) listener.onExtensionOffer(this@Tab, u)
                 url = u
                 shownUrl = u
                 canGoBack = view.canGoBack()
