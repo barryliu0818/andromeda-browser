@@ -4,6 +4,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.animation.core.animate
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import com.liquid.browser.core.t
 
 import android.content.pm.ActivityInfo
@@ -281,7 +282,12 @@ fun BrowserScreen(vm: BrowserViewModel) {
                 back.snapTo(e.progress)
             }
             back.animateTo(1f, Motion.timed(Motion.ShortMs))
+            // 像 Chromium 的上一頁轉場：截圖一直蓋著，等目的頁提交並畫出第一幀才換回即時網頁；
+            // 以前立刻歸位，會先閃一下剛離開的那頁（最多等 800ms，同網址的錨點跳轉不會改網址）
+            val from = tab.url
             if (backForward) tab.webView.goForward() else tab.webView.goBack()
+            kotlinx.coroutines.withTimeoutOrNull(800) { snapshotFlow { tab.url }.first { it != from } }
+            awaitDrawn(tab.webView)
             back.snapTo(0f)
         } catch (e: CancellationException) {
             scope.launch { back.animateTo(0f, Motion.glass()) }
@@ -979,7 +985,15 @@ private fun PullIndicator(tab: com.liquid.browser.browser.Tab, modifier: Modifie
     val rest = with(density) { 64.dp.toPx() }
     val raw = tab.pull
     val dragging = raw > 0f
-    val damped = (raw * 0.6f).let { d -> val cap = rest * 1.15f; if (d < cap) d else cap + (d - cap) * 0.15f }
+    // Chromium 下拉重新整理（SwipeRefreshLayout.moveSpinner）的張力曲線：拉到觸發點剛好停在 rest，
+    // 之後越拉越緊、平滑地收斂到 2×rest（以前是折線，過了上限突然變硬）
+    val damped = run {
+        val over = raw * 0.5f
+        val total = threshold * 0.5f
+        val t = (over - total).coerceIn(0f, rest * 2) / rest
+        val tension = (t / 4 - (t / 4) * (t / 4)) * 2
+        rest * minOf(1f, over / total) + rest * tension * 2
+    }
     val target = when { dragging -> damped; tab.refreshing -> rest; else -> 0f }
     // 收回用無回彈的彈簧（有回彈會在 0 附近晃很久、殘留在頂端）
     val y by animateFloatAsState(
