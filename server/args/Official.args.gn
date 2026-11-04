@@ -1,0 +1,15 @@
+target_os = "android"
+target_cpu = "arm64"
+is_debug = false
+is_component_build = false
+# 不含除錯符號：編譯快、輸出小
+symbol_level = 0
+blink_symbol_level = 0
+v8_symbol_level = 0
+# 播放 H.264／AAC（多數影片網站要用；個人自用）
+proprietary_codecs = true
+ffmpeg_branding = "Chrome"
+treat_warnings_as_errors = false
+system_webview_package_name = "com.liquid.orea.webview"
+is_official_build = true
+chrome_pgo_phase = 2

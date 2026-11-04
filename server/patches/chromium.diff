@@ -1,0 +1,41 @@
+diff --git a/chrome/android/BUILD.gn b/chrome/android/BUILD.gn
+index 89c170c0dc..99676479f0 100644
+--- a/chrome/android/BUILD.gn
++++ b/chrome/android/BUILD.gn
+@@ -120,6 +120,11 @@ if (_is_default_toolchain) {
+       "java/res_base/values/values.xml",
+       "java/res_base/xml/network_security_config.xml",
+       "java/res_chromium_base/drawable/themed_app_icon.xml",
++      "java/res_chromium_base/drawable/orea_icon_background.xml",
++      "java/res_chromium_base/drawable/orea_icon_foreground.xml",
++      "java/res_chromium_base/drawable/orea_icon_monochrome.xml",
++      "java/res_chromium_base/mipmap-anydpi-v26/app_icon.xml",
++      "java/res_chromium_base/mipmap-anydpi-v26/layered_app_icon.xml",
+       "java/res_chromium_base/mipmap-hdpi/app_icon.png",
+       "java/res_chromium_base/mipmap-hdpi/layered_app_icon.png",
+       "java/res_chromium_base/mipmap-hdpi/layered_app_icon_background.png",
+@@ -1807,6 +1812,11 @@ if (_is_default_toolchain) {
+     resource_overlay = true
+     sources = [
+       "java/res_chromium_base/drawable/themed_app_icon.xml",
++      "java/res_chromium_base/drawable/orea_icon_background.xml",
++      "java/res_chromium_base/drawable/orea_icon_foreground.xml",
++      "java/res_chromium_base/drawable/orea_icon_monochrome.xml",
++      "java/res_chromium_base/mipmap-anydpi-v26/app_icon.xml",
++      "java/res_chromium_base/mipmap-anydpi-v26/layered_app_icon.xml",
+       "java/res_chromium_base/mipmap-hdpi/app_icon.png",
+       "java/res_chromium_base/mipmap-hdpi/layered_app_icon.png",
+       "java/res_chromium_base/mipmap-hdpi/layered_app_icon_background.png",
+diff --git a/chrome/android/java/res_chromium_base/values/channel_constants.xml b/chrome/android/java/res_chromium_base/values/channel_constants.xml
+index cc1f2a30cb..2fd1a77a80 100644
+--- a/chrome/android/java/res_chromium_base/values/channel_constants.xml
++++ b/chrome/android/java/res_chromium_base/values/channel_constants.xml
+@@ -7,7 +7,7 @@ found in the LICENSE file.
+ 
+ <resources xmlns:android="http://schemas.android.com/apk/res/android">
+     <!-- The application name displayed to the user. -->
+-    <string name="app_name" translatable="false">Chromium</string>
++    <string name="app_name" translatable="false">Orea</string>
+     <string name="bookmark_widget_title" translatable="false">Chromium bookmarks</string>
+     <string name="search_widget_title" translatable="false">Chromium search</string>
+     <string name="quick_action_search_widget_title" translatable="false">Chromium quick action search</string>
