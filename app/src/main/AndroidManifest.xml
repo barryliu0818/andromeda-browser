@@ -81,6 +81,13 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <!-- 換成 Orea 核心時，網頁渲染程序用的替身服務（WebViewUpgrade） -->
+        <service android:name="com.norman.webviewup.lib.sandbox.stub.StubSandboxedProcessService0" android:exported="false" android:process=":sandboxed_process0" />
+        <service android:name="com.norman.webviewup.lib.sandbox.stub.StubSandboxedProcessService1" android:exported="false" android:process=":sandboxed_process1" />
+        <service android:name="com.norman.webviewup.lib.sandbox.stub.StubSandboxedProcessService2" android:exported="false" android:process=":sandboxed_process2" />
+        <service android:name="com.norman.webviewup.lib.sandbox.stub.StubSandboxedProcessService3" android:exported="false" android:process=":sandboxed_process3" />
+        <service android:name="com.norman.webviewup.lib.sandbox.stub.StubSandboxedProcessService4" android:exported="false" android:process=":sandboxed_process4" />
+
         <!-- Macrobenchmark 可量測 release 版 -->
         <profileable android:shell="true" />
     </application>

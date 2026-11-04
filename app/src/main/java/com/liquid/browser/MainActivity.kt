@@ -71,6 +71,8 @@ class MainActivity : ComponentActivity() {
         BugLog.startWatchdog()
         created = android.os.SystemClock.uptimeMillis()
         CrashLog.install(this)
+        // 網頁核心：有裝 Orea 核心就換上（必須在建立任何 WebView 之前）
+        com.liquid.browser.core.Engine.install(this)
         // debug 版才開 WebView 遠端除錯（chrome://inspect、adb forward），release 版不開
         if (BuildConfig.DEBUG) android.webkit.WebView.setWebContentsDebuggingEnabled(true)
         enableEdgeToEdge()
