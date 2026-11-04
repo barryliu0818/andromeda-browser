@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -46,7 +47,7 @@ import com.liquid.browser.ui.groupItem
 fun ExtensionsPanel(vm: BrowserViewModel, tone: Tone) {
     val accent = accent
     val exts = Extensions.list.toList()
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 48.dp)) {
+    LazyColumn(Modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 48.dp)) {
         item { PageTitle(t("擴展工具管理"), tone, Modifier.padding(start = 4.dp)) }
         item { GroupHeader(if (exts.isEmpty()) t("還沒有安裝擴充功能") else t("已安裝"), tone) }
         itemsIndexed(exts, key = { _, e -> "ext:" + e.id }) { i, e ->

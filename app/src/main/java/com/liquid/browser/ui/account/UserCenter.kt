@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -57,7 +58,8 @@ private enum class Mode { Login, Register, Reset }
 @Composable
 fun UserCenter(vm: BrowserViewModel, tone: Tone) {
     val accent = accent
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 48.dp)) {
+    // 鍵盤彈出時面板縮到鍵盤上方（imePadding），按鈕、錯誤訊息不會被鍵盤蓋住
+    LazyColumn(Modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 48.dp)) {
         item { PageTitle(t("用戶中心"), tone, Modifier.padding(start = 4.dp)) }
         // 頂部像 Safari／iOS 的 Apple 帳號頁：大頭像＋名稱＋一句說明
         item {
@@ -77,18 +79,10 @@ fun UserCenter(vm: BrowserViewModel, tone: Tone) {
             val email = Account.email
             when {
                 email != null -> {
-                    GroupHeader(t("帳號"), tone)
-                    GroupRow(
-                        0, 1, tone, email, subtitle = t("已登入・可以使用 AI 翻譯與擴充功能"),
-                        leading = { IconTile("account_circle", accent) },
-                        trailing = {
-                            Text(
-                                t("登出"),
-                                Modifier.clip(CircleShape).clickable { Account.signOut(); vm.showToast(t("已登出")) }.padding(horizontal = 12.dp, vertical = 8.dp),
-                                color = Color(0xFFFF3B30), fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-                            )
-                        },
-                    )
+                    // 郵箱已經顯示在上面的頭像下：這裡只放登出（iOS 帳號頁底部的「登出」）
+                    Box(Modifier.padding(top = 16.dp)) {
+                        GroupRow(0, 1, tone, t("登出"), destructive = true, onClick = { Account.signOut(); vm.showToast(t("已登出")) })
+                    }
                 }
                 !Account.configured -> GroupRow(0, 1, tone, t("帳號服務尚未設定"), subtitle = t("這個版本沒有編入帳號服務，暫時無法登入"), leading = { IconTile("account_circle", Palette.Gray) })
                 else -> Box(Modifier.padding(top = 12.dp)) { Forms(vm, tone, accent) }
@@ -100,6 +94,7 @@ fun UserCenter(vm: BrowserViewModel, tone: Tone) {
 @Composable
 private fun Forms(vm: BrowserViewModel, tone: Tone, accent: Color) {
     val scope = rememberCoroutineScope()
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     var mode by remember { mutableStateOf(Mode.Login) }
     var address by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -113,6 +108,8 @@ private fun Forms(vm: BrowserViewModel, tone: Tone, accent: Color) {
     LaunchedEffect(wait > 0) { while (wait > 0) { delay(1000); wait-- } }
     fun switch(m: Mode) { mode = m; sentTo = null; code = ""; password = ""; again = ""; error = null }
     fun run(block: suspend () -> Unit) {
+        // 送出時收起鍵盤：結果與錯誤訊息才看得到
+        focusManager.clearFocus()
         busy = true; error = null
         scope.launch {
             runCatching { block() }.onFailure { error = t(it.message ?: it.javaClass.simpleName) }
@@ -125,7 +122,7 @@ private fun Forms(vm: BrowserViewModel, tone: Tone, accent: Color) {
     fun newPasswordProblem(): String? = Account.passwordProblem(password) ?: if (password != again) "兩次輸入的密碼不一樣" else null
     val sendCode = {
         val p = if (mode == Mode.Register) newPasswordProblem() else null
-        if (p != null) error = t(p)
+        if (p != null) { focusManager.clearFocus(); error = t(p) }
         else run {
             if (mode == Mode.Register) Account.startSignUp(mail, password) else Account.startReset(mail)
             sentTo = mail; code = ""; wait = 60
@@ -137,7 +134,7 @@ private fun Forms(vm: BrowserViewModel, tone: Tone, accent: Color) {
             mode == Mode.Login -> run { Account.signIn(mail, password); vm.showToast(t("登入成功")) }
             sentTo == null -> sendCode()
             mode == Mode.Register -> run { Account.finishSignUp(sentTo!!, code.trim()); vm.showToast(t("註冊成功")) }
-            else -> newPasswordProblem()?.let { error = t(it) } ?: run { Account.finishReset(sentTo!!, code.trim(), password); vm.showToast(t("密碼已重設，已登入")) }
+            else -> newPasswordProblem()?.let { focusManager.clearFocus(); error = t(it) } ?: run { Account.finishReset(sentTo!!, code.trim(), password); vm.showToast(t("密碼已重設，已登入")) }
         }
     }
 
@@ -165,14 +162,21 @@ private fun Forms(vm: BrowserViewModel, tone: Tone, accent: Color) {
         val needAgain = mode != Mode.Login && showPassword
         // 鍵盤的「下一個」跳到下一欄，最後一欄按「完成」直接送出
         val lastIsCode = sentTo != null
+        // 驗證碼欄：忘記密碼時放在新密碼前面（先收信拿到驗證碼，再設新密碼）；註冊時放最後
+        val codeField = @Composable { last: Boolean ->
+            androidx.compose.animation.AnimatedVisibility(sentTo != null, enter = show, exit = hide) {
+                Field(code, { v -> code = v.filter(Char::isDigit).take(10) }, t("郵件裡的驗證碼"), tone, accent, KeyboardType.NumberPassword, gap, last = last) { submit() }
+            }
+        }
         // 寄出驗證碼後郵箱鎖定；改郵箱就要重寄
         Field(address, { address = it; if (sentTo != null && it.trim() != sentTo) sentTo = null }, t("郵箱"), tone, accent, KeyboardType.Email, Modifier.padding(top = 10.dp), last = !showPassword && !lastIsCode) { submit() }
+        if (mode == Mode.Reset) codeField(false)
         androidx.compose.animation.AnimatedVisibility(showPassword, enter = show, exit = hide) {
-            Field(password, { password = it }, if (mode == Mode.Reset) t("新密碼") else t("密碼"), tone, accent, KeyboardType.Password, gap, last = mode == Mode.Login) { submit() }
+            Field(password, { password = it }, if (mode == Mode.Reset) t("新密碼") else t("登入密碼"), tone, accent, KeyboardType.Password, gap, last = mode == Mode.Login) { submit() }
         }
         androidx.compose.animation.AnimatedVisibility(needAgain, enter = show, exit = hide) {
             Column {
-                Field(again, { again = it }, t("再輸入一次密碼"), tone, accent, KeyboardType.Password, gap, last = !lastIsCode) { submit() }
+                Field(again, { again = it }, t("再輸入一次密碼"), tone, accent, KeyboardType.Password, gap, last = mode == Mode.Reset || !lastIsCode) { submit() }
                 // 密碼規則即時打勾（不用等按下按鈕才知道哪裡不合格）
                 val rules = listOf(
                     t("至少 8 個字元") to (password.length >= 8),
@@ -190,9 +194,7 @@ private fun Forms(vm: BrowserViewModel, tone: Tone, accent: Color) {
                 }
             }
         }
-        androidx.compose.animation.AnimatedVisibility(sentTo != null, enter = show, exit = hide) {
-            Field(code, { v -> code = v.filter(Char::isDigit).take(10) }, t("郵件裡的驗證碼"), tone, accent, KeyboardType.NumberPassword, gap, last = true) { submit() }
-        }
+        if (mode != Mode.Reset) codeField(true)
         error?.let { Text(it, Modifier.padding(top = 8.dp), color = Color(0xFFFF3B30), fontSize = 13.sp) }
 
         val label = when {
