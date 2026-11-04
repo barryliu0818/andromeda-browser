@@ -243,8 +243,8 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     }
 
     private var nextId = 0L
-    /** 同方向累積捲動多少才切換網址列（約 32dp） */
-    private val collapseThreshold = 32 * app.resources.displayMetrics.density
+    /** 捲動多少網址列完全收合（約一個網址列高） */
+    private val collapseDistance = 64 * app.resources.displayMetrics.density
 
     fun attach(activity: Activity) { webContext.baseContext = activity }
     fun detach() { webContext.baseContext = getApplication() }
@@ -414,17 +414,30 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     override fun onScroll(tab: Tab, dy: Int, atBottom: Boolean) {
         if (tab != current) return
         onUserActivity?.invoke()
-        // 同方向累積捲動超過門檻才切換收合／展開（手指抖動不會讓網址列跟著抖）；捲到頂端一定展開；
-        // 到底部不展開。實際的過渡由 UI 以彈簧動畫完成（BrowserScreen）
-        if (tab.webView.scrollY <= 0) { collapsed = false; scrollAcc = 0f; return }
-        scrollAcc = if ((dy > 0) == (scrollAcc > 0)) scrollAcc + dy else dy.toFloat()
-        if (scrollAcc > collapseThreshold) collapsed = true
-        else if (scrollAcc < -collapseThreshold) collapsed = false
+        // 捲到頂端一定展開
+        if (tab.webView.scrollY <= 0) { collapsed = false; return }
+        // 跟著捲動走（Chromium BrowserControlsOffsetManager 的做法）：網址列收合程度＝累積捲動量，慣性捲動也跟著；
+        // 手指放開、捲動停下時停在半路，就以彈簧動畫彈到較近的一端
+        collapseTarget = null
+        collapse = (collapse + dy / collapseDistance).coerceIn(0f, 1f)
+        if (collapse == 1f) settled = true else if (collapse == 0f) settled = false
+        settleJob?.cancel()
+        settleJob = viewModelScope.launch {
+            delay(120)
+            while (tab.touching) delay(50)
+            if (collapse > 0f && collapse < 1f) collapsed = collapse > 0.5f
+        }
     }
 
-    /** 網址列目標狀態：true＝收合成小膠囊（collapse 由 UI 動畫往 0／1 過渡） */
-    var collapsed by mutableStateOf(false)
-    private var scrollAcc = 0f
+    /** 網址列狀態：true＝收合成小膠囊。設定時由 UI 以彈簧動畫把 [collapse] 帶到 0／1 */
+    var collapsed: Boolean
+        get() = settled
+        set(v) { settled = v; collapseTarget = if (v) 1f else 0f }
+    private var settled by mutableStateOf(false)
+    /** UI 動畫的目標；null＝正跟著捲動走，不跑動畫 */
+    var collapseTarget by mutableStateOf<Float?>(0f)
+        private set
+    private var settleJob: kotlinx.coroutines.Job? = null
 
     override fun onVisited(tab: Tab, url: String, title: String) {
         if (tab == current && url.startsWith("http")) suggestApp(tab, url)

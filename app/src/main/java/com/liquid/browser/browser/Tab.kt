@@ -189,6 +189,9 @@ class Tab(
     /** 目前畫面上實際顯示的頁面網址（load() 會先改 url，所以另外記錄） */
     private var shownUrl: String? = null
     private var touchX = 0f
+    /** 手指還按在網頁上（網址列等放開才彈到定位） */
+    var touching = false
+        private set
     private var touchY = 0f
 
     val isBlank get() = url.isEmpty()
@@ -526,6 +529,7 @@ class Tab(
         webView.setOnTouchListener { _, e ->
             touchX = e.x
             touchY = e.y
+            touching = e.actionMasked != android.view.MotionEvent.ACTION_UP && e.actionMasked != android.view.MotionEvent.ACTION_CANCEL
             trackPull(e)
             false
         }

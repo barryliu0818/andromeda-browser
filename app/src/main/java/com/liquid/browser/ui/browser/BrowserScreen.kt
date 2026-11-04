@@ -253,10 +253,10 @@ fun BrowserScreen(vm: BrowserViewModel) {
     }
 
     // 網址列滑出／滑回：滑出用退場曲線（300ms、先慢後快地離開），滑回用進場曲線（450ms、先快後慢地停住）；
-    // collectLatest：反方向捲動會取消進行中的動畫，從目前位置直接轉向，不會等它跑完
+    // collectLatest：又開始捲動（目標變 null）會取消進行中的動畫，改由捲動直接帶動
     LaunchedEffect(Unit) {
-        snapshotFlow { vm.collapsed }.collectLatest { target ->
-            animate(vm.collapse, if (target) 1f else 0f, animationSpec = Motion.collapse()) { v, _ -> vm.collapse = v }
+        snapshotFlow { vm.collapseTarget }.collectLatest { target ->
+            if (target != null) animate(vm.collapse, target, animationSpec = Motion.collapse()) { v, _ -> vm.collapse = v }
         }
     }
 
