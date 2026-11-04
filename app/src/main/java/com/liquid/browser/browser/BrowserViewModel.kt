@@ -179,6 +179,36 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
 
     fun dismissAppPrompt() { appPrompt = null }
 
+    /** 「要安裝這個擴充功能嗎？」提示列：分頁＋來源網址；同一個網址只問一次 */
+    var extOffer by mutableStateOf<Pair<Tab, String>?>(null)
+        private set
+    private val offeredExt = mutableSetOf<String>()
+
+    override fun onExtensionOffer(tab: Tab, url: String) {
+        if (tab != current || !offeredExt.add(url)) return
+        extOffer = tab to url
+        viewModelScope.launch {
+            delay(10_000)
+            if (extOffer?.second == url) extOffer = null
+        }
+    }
+
+    fun dismissExtOffer() { extOffer = null }
+
+    /** 安裝擴充功能（商店網頁、.xpi、.crx、.user.js 網址）；結果用提示訊息告訴使用者 */
+    fun installExtension(url: String) {
+        extOffer = null
+        showToast(t("正在安裝擴充功能…"))
+        viewModelScope.launch {
+            runCatching { withContext(Dispatchers.IO) { Extensions.install(url) } }
+                .onSuccess { showToast(t("已安裝「%1\$s」，重新整理網頁後生效", it.name)) }
+                .onFailure {
+                    com.liquid.browser.BugLog.event("extension", "安裝失敗 $url：$it")
+                    showToast(t("無法安裝：%1\$s", it.message?.let { m -> t(m) } ?: it.javaClass.simpleName))
+                }
+        }
+    }
+
     fun launchApp(intent: Intent) {
         appPrompt = null
         runCatching { webContext.startActivity(intent) }.onFailure { showToast(t("無法開啟 App")) }
@@ -232,6 +262,9 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         PasswordVault.init(app)
         DownloadEngine.init(app)
         AdBlocker.init(app)
+        Extensions.init(app)
+        // 安裝在背景執行緒完成：重新註冊開頁腳本要回到主執行緒（WebView 只能在主執行緒操作）
+        Extensions.onChanged = { viewModelScope.launch(Dispatchers.Main) { tabs.forEach { it.applyExtensions() } } }
         // 「識別為 iPhone」設定改變時套用到所有已開啟的分頁
         viewModelScope.launch {
             settings.map { it.identifyAsIPhone }.distinctUntilChanged().collect { on -> tabs.forEach { it.setIdentifyAsIPhone(on) } }
@@ -483,6 +516,13 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     }
 
     override fun onDownload(tab: Tab, url: String, userAgent: String, contentDisposition: String?, mime: String?) {
+        // 擴充功能套件（Firefox .xpi、Chrome .crx）：直接問要不要安裝，不存成檔案
+        val name = android.webkit.URLUtil.guessFileName(url, contentDisposition, mime)
+        if (!tab.incognito && (mime == "application/x-xpinstall" || mime == "application/x-chrome-extension" || name.endsWith(".xpi") || name.endsWith(".crx"))) {
+            offeredExt.remove(url)
+            onExtensionOffer(tab, url)
+            if (extOffer?.second == url) return
+        }
         val task = download(tab, url, android.webkit.URLUtil.guessFileName(url, contentDisposition, mime), userAgent)
         showToast(if (task != null) t("開始下載「%1\$s」", task.name) else t("無法下載此類型的檔案"))
         // 只為了下載而開的分頁（沒有任何頁面內容）直接關掉，不留空白分頁

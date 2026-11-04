@@ -887,6 +887,7 @@ fun BrowserScreen(vm: BrowserViewModel) {
                 else -> 72.dp
             }
             AppPromptBar(vm, haze, menuTone, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = above))
+            ExtensionOfferBar(vm, haze, menuTone, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = if (vm.appPrompt?.tab == vm.current) above + 60.dp else above))
             // 登入後「要儲存密碼嗎？」：同一個位置（跟跳轉 App 提示不會同時出現：一個在載入新網頁前、一個在登入送出後）
             SavePasswordBar(vm, haze, menuTone, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = above))
             // 密碼列：貼在鍵盤正上方

@@ -361,6 +361,32 @@ fun SettingsContent(vm: BrowserViewModel, tone: Tone) {
         }
         item { GroupFooter(t("無痕分頁一律阻擋已知追蹤器、封鎖第三方 Cookie、移除網址追蹤參數。個別網站可在「網站設定」關閉廣告阻擋；網站設定也會顯示安全性檢查結果")) }
 
+        // 擴充功能：已安裝的（開關、刪除）＋從網址安裝
+        item { GroupHeader(t("擴充功能"), tone) }
+        val exts = com.liquid.browser.browser.Extensions.list.toList()
+        itemsIndexed(exts, key = { _, e -> "ext:" + e.id }) { i, e ->
+            val kind = if (e.userScript) t("使用者腳本") else if (e.manifest.has("browser_specific_settings") || e.manifest.has("applications")) "Firefox" else "Chrome"
+            GroupRow(
+                i, exts.size + 1, tone, e.name.ifBlank { e.id },
+                subtitle = listOf(kind, e.version.takeIf { it.isNotBlank() }?.let { "v$it" }, e.description.takeIf { it.isNotBlank() }).filterNotNull().joinToString("・"),
+                leading = { IconTile(if (e.userScript) "code" else "extension", if (e.userScript) Color(0xFF34C759) else Color(0xFFFF9500)) },
+                trailing = {
+                    SymButton("delete", Palette.Gray, size = 20.dp, label = t("移除")) {
+                        com.liquid.browser.browser.Extensions.remove(e)
+                        vm.showToast(t("已移除「%1\$s」", e.name))
+                    }
+                    com.liquid.browser.ui.IosSwitch(e.enabled, tone, Modifier.padding(start = 4.dp)) { on -> com.liquid.browser.browser.Extensions.setEnabled(e, on) }
+                },
+                onClick = { com.liquid.browser.browser.Extensions.setEnabled(e, !e.enabled) },
+            )
+        }
+        item(key = "ext-install") {
+            Column(Modifier.fillMaxWidth().groupItem(exts.size, exts.size + 1, tone).padding(horizontal = 16.dp, vertical = 6.dp)) {
+                InstallField(tone, accent) { vm.installExtension(it) }
+            }
+            GroupFooter(t("支援 Firefox 附加元件（.xpi）、Chrome 線上應用程式商店（.crx）與使用者腳本（.user.js，Greasy Fork）。也可以直接開啟商店頁面安裝。只支援會修改網頁的擴充功能，不支援工具列按鈕與背景程式；無痕分頁不執行擴充功能"))
+        }
+
         // 密碼：要先過指紋／螢幕鎖驗證才展開清單；點一列顯示／隱藏密碼，右側刪除
         item { GroupHeader(t("密碼"), tone) }
         item(key = "passwords") {
@@ -641,6 +667,45 @@ private fun speedLine(context: Context, t: DlTask): String {
     val sec = (t.total - t.done) / t.speed
     val left = if (sec >= 60) t("%1\$s 分 %2\$s 秒", sec / 60, sec % 60) else t("%1\$s 秒", sec)
     return t("%1\$s・剩 %2\$s", speed, left)
+}
+
+/** 擴充功能網址欄：貼上或輸入商店頁面／套件網址，按「安裝」或鍵盤的完成 */
+@Composable
+private fun InstallField(tone: Tone, accent: Color, onInstall: (String) -> Unit) {
+    val context = LocalContext.current
+    var text by remember { mutableStateOf("") }
+    val go = { text.trim().takeIf { it.startsWith("http") }?.let { onInstall(it); text = "" } }
+    Column(Modifier.padding(vertical = 6.dp)) {
+        Text(t("從網址安裝"), color = tone.content, fontSize = 15.sp)
+        Row(
+            Modifier.padding(top = 6.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(tone.content.copy(alpha = 0.06f)),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            androidx.compose.foundation.text.BasicTextField(
+                text, { text = it },
+                Modifier.weight(1f).padding(horizontal = 12.dp, vertical = 12.dp),
+                singleLine = true,
+                textStyle = androidx.compose.ui.text.TextStyle(color = tone.content, fontSize = 15.sp),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(accent),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri, imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { go() }),
+                decorationBox = { inner ->
+                    if (text.isEmpty()) Text(t("商店頁面或 .xpi／.crx／.user.js 網址"), color = Palette.Gray, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    inner()
+                },
+            )
+            Text(
+                if (text.isBlank()) t("貼上") else t("安裝"),
+                Modifier.clip(CircleShape).clickable {
+                    if (text.isBlank()) {
+                        val clip = context.getSystemService(android.content.ClipboardManager::class.java)
+                        text = clip?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()?.trim().orEmpty()
+                    } else go()
+                }.padding(horizontal = 14.dp, vertical = 10.dp),
+                color = accent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
 }
 
 /** API 金鑰欄：遮蔽顯示；「貼上」直接讀剪貼簿並存檔，手動輸入則在離開欄位或按完成時存檔 */

@@ -123,6 +123,8 @@ class Tab(
         fun onNoCaptions(tab: Tab)
         /** App 專用連結（taobao://、intent://…）；gesture＝使用者點擊觸發 */
         fun onAppLink(tab: Tab, url: String, gesture: Boolean)
+        /** 擴充功能：開到商店頁面或 .user.js／.xpi／.crx，詢問要不要安裝 */
+        fun onExtensionOffer(tab: Tab, url: String)
     }
 
     val webView = WebView(context)
@@ -145,6 +147,16 @@ class Tab(
     var asIPhone = identifyAsIPhone
         private set
     private var iosShim: ScriptHandler? = null
+    private var extHandler: ScriptHandler? = null
+
+    /** 擴充功能的開頁腳本（安裝、移除、開關後重新註冊）。無痕分頁不跑擴充，跟 Firefox 的預設一樣 */
+    fun applyExtensions() {
+        extHandler?.remove()
+        extHandler = null
+        if (incognito || legacyInject) return
+        val js = Extensions.documentStartScript() ?: return
+        extHandler = WebViewCompat.addDocumentStartJavaScript(webView, js, setOf("*"))
+    }
     /** 目前實際套用的是否為 Apple 身分（個別網站例外時與 asIPhone 不同） */
     private var appliedIos: Boolean? = null
 
@@ -342,6 +354,11 @@ class Tab(
                     return true
                 }
                 if (!request.isForMainFrame) return false
+                // 使用者腳本的安裝連結（Greasy Fork 的「安裝」）：不開成一頁原始碼，改問要不要安裝
+                if (!incognito && request.url.path.orEmpty().endsWith(".user.js")) {
+                    listener.onExtensionOffer(this@Tab, request.url.toString())
+                    return true
+                }
                 // 跳轉阻擋：頁面沒被點擊就自己跳到別的網站（伺服器轉址除外）
                 val target = request.url.host.orEmpty()
                 if (listener.blockRedirects() && !request.hasGesture() && !request.isRedirect && !isBlank && progress >= 100 && pageHost.isNotEmpty() &&
@@ -382,6 +399,7 @@ class Tab(
 
             // IDM 式影片嗅探：只觀察、不攔截。網頁播放器（含 blob:／hls.js、iframe 內）實際請求的影片網址都會被記下
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): android.webkit.WebResourceResponse? {
+                Extensions.resource(request.url)?.let { return it }
                 val u = request.url.toString()
                 // 廣告／追蹤阻擋：子資源符合清單就回空內容（Brave 引擎完整比對；沒有引擎時只比對網域）
                 if (!request.isForMainFrame) {
@@ -419,6 +437,8 @@ class Tab(
                     return
                 }
                 if (listener.adBlockFor(pageHost)) view.evaluateJavascript(AdBlocker.cosmeticJs(u), null)
+                // 舊版 WebView 沒有開頁腳本：擴充改在這裡注入（只有最上層頁面）
+                if (legacyInject && !incognito) Extensions.documentStartScript()?.let { view.evaluateJavascript(it, null) }
                 translated = false
                 trTarget = null
                 trSent = 0
@@ -455,6 +475,7 @@ class Tab(
             override fun onPageFinished(view: WebView, u: String) {
                 com.liquid.browser.core.Engine.markHealthy(view.context)
                 title = view.title.orEmpty()
+                if (!incognito && Extensions.packageUrl(u) != null) listener.onExtensionOffer(this@Tab, u)
                 if (cacheFirst) { cacheFirst = false; view.settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT }
                 if (pageStartedAt > 0) {
                     val ms = android.os.SystemClock.uptimeMillis() - pageStartedAt
@@ -520,6 +541,7 @@ class Tab(
             }
         }
         installVideoBridge()
+        applyExtensions()
         webView.setOnScrollChangeListener { v, _, y, _, oldY ->
             listener.onScroll(this, y - oldY, !v.canScrollVertically(1))
         }

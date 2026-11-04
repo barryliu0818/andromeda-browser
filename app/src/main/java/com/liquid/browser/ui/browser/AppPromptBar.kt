@@ -68,3 +68,36 @@ fun AppPromptBar(vm: BrowserViewModel, haze: HazeState, tone: Tone, modifier: Mo
         }
     }
 }
+
+/** 「要安裝這個擴充功能嗎？」玻璃提示列：開到擴充商店頁面、.user.js、.xpi／.crx 時出現 */
+@Composable
+fun ExtensionOfferBar(vm: BrowserViewModel, haze: HazeState, tone: Tone, modifier: Modifier = Modifier) {
+    val offer = vm.extOffer?.takeIf { it.first == vm.current }
+    var shown by remember { mutableStateOf<Pair<com.liquid.browser.browser.Tab, String>?>(null) }
+    if (offer != null) shown = offer
+    AnimatedVisibility(
+        offer != null,
+        modifier,
+        enter = fadeIn(Motion.glass()) + slideInVertically(Motion.glass()) { it / 2 },
+        exit = fadeOut(Motion.exit()) + slideOutVertically(Motion.exit()) { it / 2 },
+    ) {
+        val o = shown ?: return@AnimatedVisibility
+        val accent = if (tone.content.luminance() > 0.5f) Palette.AccentDark else Palette.AccentLight
+        LiquidGlass(haze, tone, CircleShape) {
+            Row(Modifier.widthIn(max = 420.dp).padding(start = 14.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                com.liquid.browser.ui.Sym("extension", accent, 22.dp)
+                Text(
+                    t("在 Orea 安裝這個擴充功能？"),
+                    Modifier.weight(1f, fill = false).padding(start = 10.dp).padding(vertical = 12.dp),
+                    color = tone.content, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    t("安裝"),
+                    Modifier.padding(start = 8.dp).clip(CircleShape).clickable { vm.installExtension(o.second) }.padding(horizontal = 12.dp, vertical = 10.dp),
+                    color = accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                )
+                SymButton("close", Palette.Gray, size = 18.dp) { vm.dismissExtOffer() }
+            }
+        }
+    }
+}
