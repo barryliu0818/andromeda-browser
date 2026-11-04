@@ -236,7 +236,10 @@ class MainActivity : ComponentActivity() {
         BugLog.pendingCrash()?.let { BugLog.auto("crash", "上次閃退：\n$it") }
         refresh.poke()
         // ADPF：RenderThread 在第一幀後才存在，等畫面畫出來再建立效能提示
-        window.decorView.post { com.liquid.browser.core.AdpfHint.start(this, display?.supportedModes?.maxOfOrNull { it.refreshRate } ?: 60f) }
+        window.decorView.post {
+            com.liquid.browser.core.AdpfHint.start(this, display?.supportedModes?.maxOfOrNull { it.refreshRate } ?: 60f)
+            refresh.watchFrames { vm.customView != null }
+        }
         jankStats?.isTrackingEnabled = true
         // 尊重系統「移除動畫」無障礙設定
         Motion.reduced = android.provider.Settings.Global.getFloat(contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f

@@ -42,12 +42,40 @@ class AdaptiveRefresh(private val activity: Activity) {
     fun release() {
         handler.removeCallbacks(idle)
         if (active) apply(false)
+        frames?.let { runCatching { activity.window.removeOnFrameMetricsAvailableListener(frameListener) }; it.quitSafely() }
+        frames = null
+    }
+
+    /**
+     * 有畫面在畫（動畫、網頁自己的動畫、面板彈出、控制列淡出）也算在動：維持高刷新率。
+     * 以前只看觸控，手指一放開 1.5 秒就交還系統，沒有觸控的動畫跑到一半刷新率掉下來（看起來一頓一頓）。
+     * [paused] 回傳 true 時不算（影片全螢幕：讓系統依影片幀率省電）
+     */
+    fun watchFrames(paused: () -> Boolean) {
+        if (frames != null) return
+        val t = HandlerThread("refresh-frames").apply { start() }
+        frames = t
+        pausedCheck = paused
+        activity.window.addOnFrameMetricsAvailableListener(frameListener, Handler(t.looper))
+    }
+
+    private var frames: HandlerThread? = null
+    private var pausedCheck: () -> Boolean = { false }
+    @Volatile private var lastFrameAt = 0L
+    @Volatile private var ignoreFramesUntil = 0L
+    private val pokeOnMain = Runnable { if (!pausedCheck()) poke() }
+    private val frameListener = Window.OnFrameMetricsAvailableListener { _, _, _ ->
+        // 每 100ms 最多通知主執行緒一次
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now >= ignoreFramesUntil && now - lastFrameAt > 100) { lastFrameAt = now; handler.post(pokeOnMain) }
     }
 
     private fun apply(on: Boolean) {
         active = on
         val lp = activity.window.attributes
         val mode = if (on) highMode else 0
+        // 交還系統時改視窗屬性本身會重畫一幀：這段時間的幀不算，否則會一直切回高刷新率
+        if (!on) ignoreFramesUntil = android.os.SystemClock.uptimeMillis() + 400
         if (lp.preferredDisplayModeId != mode) activity.window.attributes = lp.apply { preferredDisplayModeId = mode }
         AdpfHint.powerEfficient(!on)
     }
