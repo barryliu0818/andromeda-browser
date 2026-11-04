@@ -20,9 +20,9 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /**
- * Orea 帳號：郵箱＋驗證碼註冊／登入（Supabase Auth 的 email OTP，免密碼）。
- *  - 註冊：送驗證碼到郵箱（create_user），輸入正確的驗證碼才算註冊成功
- *  - 登入：只送給已註冊的郵箱
+ * Orea 帳號（Supabase Auth）：郵箱＋密碼。
+ *  - 註冊：郵箱＋密碼（輸入兩次）→ 寄驗證碼到郵箱，輸入正確的驗證碼才算註冊成功
+ *  - 登入：郵箱＋密碼，不用驗證碼；忘記密碼：郵箱驗證碼 → 設定新密碼
  * 登入狀態（refresh token）用 Android Keystore 的硬體金鑰加密存在 App 私有資料夾；開 App 時在背景換新的 token，
  * 伺服器說帳號已失效才登出（沒網路時維持登入）。
  * 服務網址與公開金鑰（anon key）從 local.properties 的 SUPABASE_URL、SUPABASE_ANON_KEY 編進 App，不進 git。
@@ -53,28 +53,41 @@ object Account {
             .onFailure { if (it is HttpError && it.code in 400..401) signOut() }
     }
 
-    /**
-     * 送驗證碼。register＝true：新郵箱建立帳號；false：只送給已註冊的郵箱。
-     * 失敗丟出例外，訊息可直接顯示（經過 t() 翻譯）
-     */
-    suspend fun sendCode(address: String, register: Boolean) {
+    /** 密碼規則：至少 8 個字元，要有英文字母也要有數字；符合回傳 null，否則回傳說明 */
+    fun passwordProblem(pw: String): String? =
+        if (pw.length >= 8 && pw.any { it in 'a'..'z' || it in 'A'..'Z' } && pw.any(Char::isDigit)) null
+        else "密碼至少 8 個字元，要有英文字母和數字"
+
+    // 所有請求：失敗丟出 IllegalStateException，訊息可直接顯示（經過 t() 翻譯）
+    private suspend fun call(path: String, body: JSONObject, method: String = "POST", bearer: String? = null): JSONObject {
         check(configured) { "尚未設定帳號服務" }
-        try {
-            post("otp", JSONObject().put("email", address).put("create_user", register))
-        } catch (e: HttpError) {
-            throw IllegalStateException(friendly(e, register))
-        }
+        return try { post(path, body, method, bearer) } catch (e: HttpError) { throw IllegalStateException(friendly(e)) }
     }
 
-    /** 驗證碼正確：登入（註冊時也就是註冊成功） */
-    suspend fun verify(address: String, code: String) {
-        check(configured) { "尚未設定帳號服務" }
-        val res = try {
-            post("verify", JSONObject().put("type", "email").put("email", address).put("token", code))
-        } catch (e: HttpError) {
-            throw IllegalStateException(friendly(e, false))
-        }
-        save(res)
+    /** 登入：郵箱＋密碼（不用驗證碼） */
+    suspend fun signIn(address: String, password: String) =
+        save(call("token?grant_type=password", JSONObject().put("email", address).put("password", password)))
+
+    /** 註冊第一步：建立帳號並寄驗證碼到郵箱（帳號要等驗證碼正確才啟用） */
+    suspend fun startSignUp(address: String, password: String) {
+        val res = call("signup", JSONObject().put("email", address).put("password", password))
+        // 郵箱已經註冊過：伺服器為了不洩漏帳號是否存在，回一個沒有登入方式（identities 空）的假帳號、也不寄信
+        val identities = (res.optJSONObject("user") ?: res).optJSONArray("identities")
+        if (identities != null && identities.length() == 0) throw IllegalStateException("這個郵箱已經註冊，請直接登入")
+    }
+
+    /** 註冊第二步：驗證碼正確才算註冊成功，同時登入 */
+    suspend fun finishSignUp(address: String, code: String) =
+        save(call("verify", JSONObject().put("type", "signup").put("email", address).put("token", code)))
+
+    /** 忘記密碼第一步：寄驗證碼到郵箱 */
+    suspend fun startReset(address: String) { call("recover", JSONObject().put("email", address)) }
+
+    /** 忘記密碼第二步：驗證碼正確後設定新密碼，並登入 */
+    suspend fun finishReset(address: String, code: String, newPassword: String) {
+        val session = call("verify", JSONObject().put("type", "recovery").put("email", address).put("token", code))
+        call("user", JSONObject().put("password", newPassword), "PUT", session.getString("access_token"))
+        save(session)
     }
 
     fun signOut() {
@@ -90,13 +103,18 @@ object Account {
     }
 
     // 伺服器錯誤 → 使用者看得懂的說明（GoTrue 的 error_code）
-    private fun friendly(e: HttpError, register: Boolean): String {
-        val code = runCatching { JSONObject(e.body) }.getOrNull()?.let { it.optString("error_code").ifBlank { it.optString("code") } }.orEmpty()
-        val msg = runCatching { JSONObject(e.body) }.getOrNull()?.let { it.optString("msg").ifBlank { it.optString("error_description") } }.orEmpty()
+    private fun friendly(e: HttpError): String {
+        val json = runCatching { JSONObject(e.body) }.getOrNull()
+        val code = json?.let { it.optString("error_code").ifBlank { it.optString("error") } }.orEmpty()
+        val msg = json?.let { it.optString("msg").ifBlank { it.optString("error_description") } }.orEmpty()
         return when {
             e.code == 429 || code.contains("rate_limit") -> "傳送太頻繁，請稍後再試"
             code == "otp_expired" -> "驗證碼錯誤或已過期"
-            code == "otp_disabled" || code == "signup_disabled" || (!register && msg.contains("Signups not allowed", true)) -> "這個郵箱還沒註冊"
+            code == "invalid_credentials" || msg.contains("Invalid login credentials", true) -> "郵箱或密碼不正確"
+            code == "email_not_confirmed" -> "這個郵箱還沒完成驗證，請重新註冊取得驗證碼"
+            code == "user_already_exists" || code == "email_exists" -> "這個郵箱已經註冊，請直接登入"
+            code == "weak_password" -> "密碼太簡單"
+            code == "same_password" -> "新密碼不能和舊密碼一樣"
             code == "validation_failed" || code == "email_address_invalid" -> "郵箱格式不正確"
             else -> msg.ifBlank { "伺服器錯誤（HTTP ${e.code}）" }
         }
@@ -104,9 +122,10 @@ object Account {
 
     class HttpError(val code: Int, val body: String) : Exception("HTTP $code")
 
-    private suspend fun post(path: String, body: JSONObject): JSONObject = withContext(Dispatchers.IO) {
+    private suspend fun post(path: String, body: JSONObject, method: String = "POST", bearer: String? = null): JSONObject = withContext(Dispatchers.IO) {
         val conn = (URL(BuildConfig.SUPABASE_URL.trimEnd('/') + "/auth/v1/" + path).openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
+            requestMethod = method
+            bearer?.let { setRequestProperty("Authorization", "Bearer $it") }
             connectTimeout = 15_000
             readTimeout = 20_000
             doOutput = true

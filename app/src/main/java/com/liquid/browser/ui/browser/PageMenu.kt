@@ -79,6 +79,8 @@ class PageMenuActions(
     val onDownloads: () -> Unit,
     val onSiteSettings: () -> Unit,
     val onSettings: () -> Unit,
+    /** 用戶中心：登入、註冊、忘記密碼 */
+    val onUserCenter: () -> Unit,
     /** 回報問題：截圖＋當下狀態存進問題紀錄（BugLog） */
     val onReport: () -> Unit,
 )
@@ -109,6 +111,7 @@ fun pageMenu(anchor: Rect, tab: Tab, vm: BrowserViewModel, tone: Tone, context: 
             },
             MenuItem(t("回報問題"), "bug_report") { actions.onReport() },
             // 設定要隨時找得到：不只在分頁總覽的資料庫鈕裡
+            MenuItem(t("用戶中心"), "account_circle", push = true) { actions.onUserCenter() },
             MenuItem(t("設定"), "settings", push = true) { actions.onSettings() },
         ),
     )
@@ -120,6 +123,7 @@ fun libraryMenu(anchor: Rect, actions: PageMenuActions, withReport: Boolean = fa
     items = listOf(
         MenuItem(t("書籤與歷史紀錄"), "book", push = true) { actions.onLibrary() },
         MenuItem(t("下載項目"), "download", push = true) { actions.onDownloads() },
+        MenuItem(t("用戶中心"), "account_circle", push = true) { actions.onUserCenter() },
         MenuItem(t("設定"), "settings", push = true) { actions.onSettings() },
     ) + if (withReport) listOf(MenuItem(t("回報問題"), "bug_report") { actions.onReport() }) else emptyList(),
 )

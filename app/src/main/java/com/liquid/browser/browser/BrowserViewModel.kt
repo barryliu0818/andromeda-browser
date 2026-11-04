@@ -786,16 +786,18 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
 
     override fun onReapplyTranslation(tab: Tab) { if (!tab.translated && Account.signedIn) toggleTranslate(tab) }
 
-    /** 要登入才能用的功能（AI 翻譯、安裝擴充）：未登入時提示並打開設定頁的帳號區（BrowserScreen 看 [loginAsk]） */
-    var loginAsk by mutableStateOf(0)
+    /** 打開用戶中心（BrowserScreen 看這個計數）：要登入才能用的功能（AI 翻譯、安裝擴充）未登入時，或設定頁的「用戶中心」 */
+    var userCenterAsk by mutableStateOf(0)
         private set
 
     private fun requireLogin(what: String): Boolean {
         if (Account.signedIn) return true
         showToast(t("登入後才能%1\$s", t(what)))
-        loginAsk++
+        userCenterAsk++
         return false
     }
+
+    fun openUserCenter() { userCenterAsk++ }
 
     fun toggleTranslate(tab: Tab) {
         if (tab.translated) tab.showOriginal()
