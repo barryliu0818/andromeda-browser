@@ -12,6 +12,8 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // 允許在模擬器上執行（數據僅供參考，正式量測請用真機）
         testInstrumentationRunnerArguments["androidx.benchmark.suppressErrors"] = "EMULATOR"
+        // App 有 personal／share 兩個版本：用自用版產生（兩版程式碼相同，設定檔通用）
+        missingDimensionStrategy("key", "personal")
     }
     targetProjectPath = ":app"
 }

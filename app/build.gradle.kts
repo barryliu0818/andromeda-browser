@@ -127,3 +127,8 @@ dependencies {
     implementation(libs.androidx.metrics.performance)
     baselineProfile(project(":baselineprofile"))
 }
+
+baselineProfile {
+    // 產生的 Baseline Profile 放進 main：personal、share 兩版共用（重新產生：./gradlew :app:generatePersonalReleaseBaselineProfile）
+    mergeIntoMain = true
+}
