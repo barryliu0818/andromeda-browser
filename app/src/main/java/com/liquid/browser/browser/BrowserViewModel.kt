@@ -772,7 +772,10 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     )
 
     // 彈出視窗開的新分頁：網址要等 WebView 開始載入才知道，先標成 about:blank，等待期間顯示空白網頁而不是首頁（否則會先閃一下首頁）
-    override fun onPopup(opener: Tab): Tab = newTab(incognito = opener.incognito).also { it.opener = opener; it.url = POPUP_PENDING }
+    // 彈窗先在背景開：第一個網址確定不是廣告才切過去（onPopupReady），是廣告就直接關掉，畫面不會閃一下白頁或廣告
+    override fun onPopupReady(tab: Tab) { if (tab in tabs && tab.opener == current) select(tab) }
+
+    override fun onPopup(opener: Tab): Tab = newTab(incognito = opener.incognito, background = true).also { it.opener = opener; it.url = POPUP_PENDING }
 
     /** 網頁沒有上一頁時的返回：彈出視窗開的分頁 → 關掉回到來源頁（原頁面還在，不必重新載入）；其他 → 回到首頁 */
     fun backFromFirstPage(tab: Tab) {

@@ -715,7 +715,7 @@ fun BrowserScreen(vm: BrowserViewModel) {
                 }
                 // 網址列上方的浮動膠囊：翻譯進度（翻完就收起，已翻譯的狀態改由網址列翻譯鈕的顏色表示）＋ IDM 式「下載影片」
                 val showTr = tab.translated && tab.trDone < tab.trSent && !focused && !finding
-                val showDl = tab.media.isNotEmpty() && !focused && !finding && settings.videoDownloadButton
+                val showDl = tab.media.isNotEmpty() && !focused && !finding && settings.videoDownloadButton && vm.customView == null
                 AnimatedVisibility(showTr || showDl, enter = expandVertically(Motion.glass()) + fadeIn(), exit = shrinkVertically(Motion.glass()) + fadeOut()) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
                         AnimatedVisibility(
@@ -754,9 +754,8 @@ fun BrowserScreen(vm: BrowserViewModel) {
                                     scope.launch {
                                         val options = vm.mediaOptions(tab)
                                         probing = false
-                                        // 第一項：用 App 播放器全螢幕播放最高畫質；其餘為各畫質下載
-                                        val play = options.firstOrNull()?.let { best -> listOf(MenuItem(t("用播放器全螢幕播放"), "play_circle") { vm.playSniffed(tab, best.url) }) }.orEmpty()
-                                        menu.show(MenuSpec(pillBounds, play + options.map { o -> MenuItem(mediaOptionLabel(o), "download") { vm.downloadSniffed(tab, o.url) } }, width = 300))
+                                        // 各畫質下載（播放一律用網頁自己的播放器）
+                                        menu.show(MenuSpec(pillBounds, options.map { o -> MenuItem(mediaOptionLabel(o), "download") { vm.downloadSniffed(tab, o.url) } }, width = 300))
                                     }
                                 },
                             ) {

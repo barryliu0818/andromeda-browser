@@ -95,6 +95,8 @@
       if (last) {
         if (f !== last) { fill(f, last); hideSiteControls(f, last); }
         last.dispatchEvent(new Event('webkitbeginfullscreen'));
+        // 全螢幕看這部時，網頁上其他還在播的影片（廣告預覽、另一部）一起暫停：同時解碼好幾部影片會讓全螢幕播放卡頓
+        Array.prototype.forEach.call(document.querySelectorAll('video'), function (o) { if (o !== last && !o.paused) try { o.pause(); } catch (e) {} });
       }
     } else {
       unfill();
@@ -203,7 +205,7 @@
 
   function check(v) {
     var src = sourceOf(v);
-    if (/^https?:/i.test(src)) addNativeButton(v, src);
+    // 不再在影片上疊「原生播放器」與下載按鈕：一律用網頁自己的播放器；下載用 App 底部的「下載影片」
     // 手勢層（只在全螢幕時啟用手勢與 App 的控制列）掛在所有影片上
     if (src && window.__liquidGestures) window.__liquidGestures.attach(v);
   }
@@ -242,7 +244,18 @@
 (function () {
   if (window.__lqTapTrack) return;
   window.__lqTapTrack = true;
-  window.addEventListener('pointerdown', function (e) { window.__lqLastDown = e.target; }, true);
+  window.addEventListener('pointerdown', function (e) {
+    window.__lqLastDown = e.target;
+    // 點在影片畫面上：告訴 App，這一下若開出彈窗，幾乎一定是蓋在影片上的廣告（看影片的人不會想開新視窗）
+    var vs = document.querySelectorAll('video');
+    for (var i = 0; i < vs.length; i++) {
+      var r = vs[i].getBoundingClientRect();
+      if (r.width > 120 && r.height > 80 && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
+        try { if (window.LiquidBridge) LiquidBridge.postMessage('{"type":"vtap"}'); } catch (x) {}
+        break;
+      }
+    }
+  }, true);
   function overlap(a, b) {
     var w = Math.min(a.right, b.right) - Math.max(a.left, b.left), h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
     return w > 0 && h > 0 ? (w * h) / Math.max(1, b.width * b.height) : 0;

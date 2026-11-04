@@ -108,6 +108,8 @@ class Tab(
         fun onPopupBlocked(tab: Tab)
         /** 點擊開出來的彈窗第一頁是廣告網站：關掉這個分頁、回到原本的網頁 */
         fun onPopupAd(tab: Tab, url: String)
+        /** 彈窗的第一個網址確定不是廣告：切到前景 */
+        fun onPopupReady(tab: Tab) {}
 
         /** 網頁點擊開的新視窗（window.open／target=_blank）：開成新分頁並記住來源頁，回傳新分頁 */
         fun onPopup(opener: Tab): Tab
@@ -157,6 +159,9 @@ class Tab(
     private var upgraded: String? = null
     /** 網頁點擊開出來的彈窗分頁：第一個網址是廣告網站就關掉（onPageStarted） */
     var popupCheck = false
+
+    /** 最近一次點在網頁影片畫面上的時間（video_detect.js 的 vtap） */
+    private var videoTapAt = 0L
 
     /** 防指紋腳本（Brave 式防追蹤開關改變時重新註冊；無痕分頁也套用） */
     fun applyShields(on: Boolean) {
@@ -437,6 +442,7 @@ class Tab(
                 // 點擊開出來的彈窗：第一個真正的網址（about:blank 之後）是廣告網站就關掉
                 // 點擊開出來的彈窗：使用者碰它之前，任何一步（含網站自己的 pop?url=廣告 中轉頁）是廣告就關掉、回原頁
                 if (popupCheck && popupIsAd(u)) { view.stopLoading(); listener.onPopupAd(this@Tab, u); return }
+                if (popupCheck && u.startsWith("http")) listener.onPopupReady(this@Tab)
                 pageStartedAt = android.os.SystemClock.uptimeMillis()
                 media.clear()
                 blockedCount = 0
@@ -559,6 +565,12 @@ class Tab(
                 // 開出來的第一頁是廣告網站才關掉（見 onPageStarted 的 popupCheck）
                 // 使用者關掉「阻止跳轉」：沒點擊的彈窗也照開
                 if (!isUserGesture && listener.blockRedirects()) return false
+                // 點影片畫面開出的彈窗＝蓋在影片上的廣告層：不開，並讓那層點擊穿透，下一下就點到播放器
+                if (listener.blockRedirects() && android.os.SystemClock.uptimeMillis() - videoTapAt < 1500) {
+                    videoTapAt = 0
+                    listener.onPopupBlocked(this@Tab)
+                    return false
+                }
                 val popup = listener.onPopup(this@Tab)
                 popup.popupCheck = true
                 (resultMsg.obj as? WebView.WebViewTransport)?.webView = popup.webView
@@ -640,6 +652,7 @@ class Tab(
                 when (type) {
                     "haptic" -> webView.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                     "nopull" -> { pullArmed = false; pull = 0f }
+                    "vtap" -> videoTapAt = android.os.SystemClock.uptimeMillis()
                     "download_best" -> listener.onDownloadBest(this)
                     "tr" -> {
                         val arr = json.optJSONArray("texts") ?: return@addWebMessageListener

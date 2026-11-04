@@ -272,19 +272,16 @@ fun SettingsContent(vm: BrowserViewModel, tone: Tone) {
         item {
             // 網站看到的裝置：Android（Chrome）或 iOS（Safari）；影響網站版面與播放器行為（例如全螢幕方式）
             GroupMenuRow(
-                0, 5, tone, t("網站識別為"), listOf("Android", "iOS"), if (s.identifyAsIPhone) 1 else 0,
+                0, 4, tone, t("網站識別為"), listOf("Android", "iOS"), if (s.identifyAsIPhone) 1 else 0,
                 subtitle = if (s.identifyAsIPhone) t("以 iOS Safari 身分瀏覽") else t("以 Android Chrome 身分瀏覽"),
                 leading = { IconTile("smartphone", accent) },
             ) { i -> vm.updateSettings { it.copy(identifyAsIPhone = i == 1) } }
         }
         item {
-            GroupToggle(1, 5, tone, t("預設要求桌面版網站"), s.desktopByDefault, leading = { IconTile("desktop_windows", Color(0xFF30B0C7)) }) { v -> vm.updateSettings { it.copy(desktopByDefault = v) } }
+            GroupToggle(1, 4, tone, t("預設要求桌面版網站"), s.desktopByDefault, leading = { IconTile("desktop_windows", Color(0xFF30B0C7)) }) { v -> vm.updateSettings { it.copy(desktopByDefault = v) } }
         }
         item {
-            GroupToggle(2, 5, tone, t("原生播放器播放影片"), s.nativePlayer, leading = { IconTile("play_circle", red) }) { v -> vm.updateSettings { it.copy(nativePlayer = v) } }
-        }
-        item {
-            GroupToggle(3, 5, tone, t("顯示「下載影片」按鈕"), s.videoDownloadButton, subtitle = t("網頁有影片時出現在網址列上方"), leading = { IconTile("download", Color(0xFFFF9500)) }) { v ->
+            GroupToggle(2, 4, tone, t("顯示「下載影片」按鈕"), s.videoDownloadButton, subtitle = t("網頁有影片時出現在網址列上方"), leading = { IconTile("download", Color(0xFFFF9500)) }) { v ->
                 vm.updateSettings { it.copy(videoDownloadButton = v) }
             }
         }
@@ -294,7 +291,7 @@ fun SettingsContent(vm: BrowserViewModel, tone: Tone) {
             val ver = androidx.compose.runtime.remember { com.liquid.browser.core.Engine.installedVersion(ctx) }
             var on by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(com.liquid.browser.core.Engine.wanted(ctx)) }
             GroupToggle(
-                4, 5, tone, t("使用 Orea 核心"), on && ver != null,
+                3, 4, tone, t("使用 Orea 核心"), on && ver != null,
                 subtitle = if (ver == null) t("尚未安裝 Orea 核心") else t("使用中：") + com.liquid.browser.core.Engine.active,
                 leading = { IconTile("memory", Color(0xFF5856D6)) },
             ) { v ->

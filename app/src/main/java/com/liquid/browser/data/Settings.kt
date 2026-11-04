@@ -29,7 +29,7 @@ enum class SearchEngine(val label: String, val prefix: String) {
 data class Settings(
     val engine: SearchEngine = SearchEngine.Google,
     val desktopByDefault: Boolean = false,
-    val nativePlayer: Boolean = true,
+    val nativePlayer: Boolean = false,
     val reduceTransparency: Boolean = false,
     /** 起始頁自訂背景圖（content:// URI），null 為預設淺灰／近黑 */
     val startBackground: String? = null,
@@ -107,7 +107,7 @@ class SettingsStore(private val context: Context) {
     private fun Preferences.toSettings() = Settings(
         engine = this[K.engine]?.let { runCatching { SearchEngine.valueOf(it) }.getOrNull() } ?: SearchEngine.Google,
         desktopByDefault = this[K.desktop] ?: false,
-        nativePlayer = this[K.native] ?: true,
+        nativePlayer = false, // 一律用網頁自己的播放器（選項已拿掉）
         reduceTransparency = this[K.reduce] ?: false,
         startBackground = this[K.bg],
         identifyAsIPhone = this[K.iphone] ?: true,

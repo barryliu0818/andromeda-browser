@@ -10,7 +10,7 @@
 
   var SPEC = {
     longPressMs: 400,
-    doubleTapMs: 280,
+    doubleTapMs: 300,     // 同 Android ViewConfiguration 的雙擊間隔
     accumulateMs: 700,
     seekStep: 10,          // 秒
     sideZone: 0.35,
