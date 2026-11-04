@@ -55,6 +55,12 @@ android {
         }
     }
 
+    // 內建的 Orea Chromium 核心（約 180MB，不進 git：GitHub 單檔上限 100MB）。local.properties 的 OREA_CORE_DIR 指到
+    // 含 orea_core/core.bin（核心 APK）與 orea_core/version.txt 的資料夾就打包進 App；沒設定則照常編譯、用系統 WebView（見 Engine）
+    (providers.gradleProperty("OREA_CORE_DIR").orNull ?: localProps.getProperty("OREA_CORE_DIR"))?.let { dir ->
+        if (file(dir).resolve("orea_core/core.bin").isFile) sourceSets.getByName("main").assets.srcDir(dir)
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
