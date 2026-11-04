@@ -198,6 +198,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     /** 安裝擴充功能（商店網頁、.xpi、.crx、.user.js 網址）；結果用提示訊息告訴使用者 */
     fun installExtension(url: String) {
         extOffer = null
+        if (!requireLogin("安裝擴充功能")) return
         showToast(t("正在安裝擴充功能…"))
         viewModelScope.launch {
             runCatching { withContext(Dispatchers.IO) { Extensions.install(url) } }
@@ -263,6 +264,8 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         DownloadEngine.init(app)
         AdBlocker.init(app)
         Extensions.init(app)
+        Account.init(app)
+        viewModelScope.launch { Account.refresh() }
         // 安裝在背景執行緒完成：重新註冊開頁腳本要回到主執行緒（WebView 只能在主執行緒操作）
         Extensions.onChanged = { viewModelScope.launch(Dispatchers.Main) { tabs.forEach { it.applyExtensions() } } }
         // 「識別為 iPhone」設定改變時套用到所有已開啟的分頁
@@ -781,11 +784,22 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         return if (nightSwitch) TranslateEngine.DeepSeek else s.translateEngine
     }
 
-    override fun onReapplyTranslation(tab: Tab) { if (!tab.translated) toggleTranslate(tab) }
+    override fun onReapplyTranslation(tab: Tab) { if (!tab.translated && Account.signedIn) toggleTranslate(tab) }
+
+    /** 要登入才能用的功能（AI 翻譯、安裝擴充）：未登入時提示並打開設定頁的帳號區（BrowserScreen 看 [loginAsk]） */
+    var loginAsk by mutableStateOf(0)
+        private set
+
+    private fun requireLogin(what: String): Boolean {
+        if (Account.signedIn) return true
+        showToast(t("登入後才能%1\$s", t(what)))
+        loginAsk++
+        return false
+    }
 
     fun toggleTranslate(tab: Tab) {
         if (tab.translated) tab.showOriginal()
-        else {
+        else if (requireLogin("使用 AI 翻譯")) {
             aiFailedFor = null
             // 設定改過目標語言：先丟掉頁面上舊語言的譯文
             val target = settings.value.translateTarget.name
@@ -830,6 +844,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
 
     fun toggleYouTubeSubs(tab: Tab) {
         val on = !tab.ytSubs
+        if (on && !requireLogin("使用 AI 翻譯")) return
         tab.setYouTubeSubs(on)
         if (on) showToast(t("字幕翻譯已開啟"))
     }

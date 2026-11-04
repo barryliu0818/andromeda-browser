@@ -109,6 +109,13 @@ fun SettingsContent(vm: BrowserViewModel, tone: Tone) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 48.dp)) {
         item { PageTitle(t("設定"), tone, Modifier.padding(start = 4.dp)) }
 
+        // 帳號：郵箱驗證碼註冊／登入；登入後才能用 AI 翻譯、安裝擴充功能
+        item { GroupHeader(t("帳號"), tone) }
+        item(key = "account") {
+            AccountSection(vm, tone, accent)
+            GroupFooter(t("登入後才能使用 AI 翻譯與安裝擴充功能。驗證碼會寄到你的郵箱，不需要密碼"))
+        }
+
         // 一般：介面語言、搜尋引擎（下拉選單，不平鋪）
         item { GroupHeader(t("一般"), tone) }
         item(key = "lang") {
@@ -667,6 +674,123 @@ private fun speedLine(context: Context, t: DlTask): String {
     val sec = (t.total - t.done) / t.speed
     val left = if (sec >= 60) t("%1\$s 分 %2\$s 秒", sec / 60, sec % 60) else t("%1\$s 秒", sec)
     return t("%1\$s・剩 %2\$s", speed, left)
+}
+
+/** 帳號區：已登入顯示郵箱與登出；未登入是「登入／註冊」切換＋郵箱＋驗證碼兩步 */
+@Composable
+private fun AccountSection(vm: BrowserViewModel, tone: Tone, accent: Color) {
+    val red = Color(0xFFFF3B30)
+    val email = com.liquid.browser.browser.Account.email
+    if (email != null) {
+        GroupRow(
+            0, 1, tone, email, subtitle = t("已登入"),
+            leading = { IconTile("account_circle", accent) },
+            trailing = {
+                Text(
+                    t("登出"),
+                    Modifier.clip(CircleShape).clickable { com.liquid.browser.browser.Account.signOut(); vm.showToast(t("已登出")) }.padding(horizontal = 12.dp, vertical = 8.dp),
+                    color = red, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                )
+            },
+        )
+        return
+    }
+    if (!com.liquid.browser.browser.Account.configured) {
+        GroupRow(0, 1, tone, t("帳號服務尚未設定"), subtitle = t("這個版本沒有編入帳號服務，暫時無法登入"), leading = { IconTile("account_circle", Palette.Gray) })
+        return
+    }
+    val scope = rememberCoroutineScope()
+    var register by remember { mutableStateOf(false) }
+    var address by remember { mutableStateOf("") }
+    var code by remember { mutableStateOf("") }
+    // 驗證碼寄到哪個郵箱（null＝還沒寄）；寄出後 60 秒才能重寄
+    var sentTo by remember { mutableStateOf<String?>(null) }
+    var wait by remember { mutableStateOf(0) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(wait > 0) { while (wait > 0) { delay(1000); wait-- } }
+    val validMail = Regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$").matches(address.trim())
+    val send: () -> Unit = {
+        val to = address.trim()
+        busy = true; error = null
+        scope.launch {
+            runCatching { com.liquid.browser.browser.Account.sendCode(to, register) }
+                .onSuccess { sentTo = to; code = ""; wait = 60; vm.showToast(t("驗證碼已寄到 %1\$s", to)) }
+                .onFailure { error = t(it.message ?: it.javaClass.simpleName) }
+            busy = false
+        }
+    }
+    val verify: () -> Unit = {
+        val to = sentTo
+        if (to != null && code.trim().length >= 6) {
+            busy = true; error = null
+            scope.launch {
+                runCatching { com.liquid.browser.browser.Account.verify(to, code.trim()) }
+                    .onSuccess { vm.showToast(if (register) t("註冊成功") else t("登入成功")) }
+                    .onFailure { error = t(it.message ?: it.javaClass.simpleName) }
+                busy = false
+            }
+        }
+    }
+    Column(Modifier.fillMaxWidth().groupItem(0, 1, tone).padding(horizontal = 16.dp, vertical = 12.dp)) {
+        // 登入／註冊切換（換模式就重來）
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(tone.content.copy(alpha = 0.06f)).padding(3.dp)) {
+            listOf(false to t("登入"), true to t("註冊")).forEach { (r, label) ->
+                Text(
+                    label,
+                    Modifier.weight(1f).clip(RoundedCornerShape(10.dp))
+                        .background(if (register == r) tone.content.copy(alpha = 0.10f) else Color.Transparent)
+                        .clickable { if (register != r) { register = r; sentTo = null; code = ""; error = null } }
+                        .semantics { selected = register == r }
+                        .padding(vertical = 8.dp),
+                    color = tone.content, fontSize = 15.sp, fontWeight = if (register == r) FontWeight.SemiBold else FontWeight.Normal,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+            }
+        }
+        AccountField(address, { address = it; if (sentTo != null && it.trim() != sentTo) sentTo = null }, t("郵箱"), tone, accent, androidx.compose.ui.text.input.KeyboardType.Email, Modifier.padding(top = 10.dp)) {
+            if (validMail && !busy && wait == 0) send()
+        }
+        if (sentTo != null) AccountField(code, { v -> code = v.filter(Char::isDigit).take(10) }, t("郵件裡的驗證碼"), tone, accent, androidx.compose.ui.text.input.KeyboardType.NumberPassword, Modifier.padding(top = 8.dp)) { verify() }
+        error?.let { Text(it, Modifier.padding(top = 8.dp), color = red, fontSize = 13.sp) }
+        Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            val primary = if (sentTo == null) t("傳送驗證碼") else if (register) t("完成註冊") else t("登入")
+            val enabled = !busy && if (sentTo == null) validMail && wait == 0 else code.trim().length >= 6
+            Box(
+                Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(if (enabled) accent else accent.copy(alpha = 0.35f))
+                    .clickable(enabled = enabled) { if (sentTo == null) send() else verify() }.padding(vertical = 12.dp),
+                Alignment.Center,
+            ) {
+                if (busy) androidx.compose.material3.CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
+                else Text(primary, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            }
+            if (sentTo != null) Text(
+                if (wait > 0) t("重新傳送（%1\$s）", wait) else t("重新傳送"),
+                Modifier.clip(CircleShape).clickable(enabled = wait == 0 && !busy) { send() }.padding(horizontal = 8.dp, vertical = 10.dp),
+                color = if (wait == 0) accent else Palette.Gray, fontSize = 14.sp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AccountField(
+    value: String, onChange: (String) -> Unit, hint: String, tone: Tone, accent: Color,
+    type: androidx.compose.ui.text.input.KeyboardType, modifier: Modifier = Modifier, onDone: () -> Unit,
+) {
+    androidx.compose.foundation.text.BasicTextField(
+        value, onChange,
+        modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(tone.content.copy(alpha = 0.06f)).padding(horizontal = 12.dp, vertical = 12.dp),
+        singleLine = true,
+        textStyle = androidx.compose.ui.text.TextStyle(color = tone.content, fontSize = 15.sp),
+        cursorBrush = androidx.compose.ui.graphics.SolidColor(accent),
+        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = type, imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { onDone() }),
+        decorationBox = { inner ->
+            if (value.isEmpty()) Text(hint, color = Palette.Gray, fontSize = 15.sp)
+            inner()
+        },
+    )
 }
 
 /** 擴充功能網址欄：貼上或輸入商店頁面／套件網址，按「安裝」或鍵盤的完成 */

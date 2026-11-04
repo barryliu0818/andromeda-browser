@@ -27,6 +27,9 @@ android {
         targetSdk = 37
         versionCode = 4
         versionName = "0.4"
+        // 帳號服務（Supabase）：網址與公開金鑰（anon key，本來就是給 App 用的）也從 local.properties 讀；兩版都要能登入
+        buildConfigField("String", "SUPABASE_URL", "\"${providers.gradleProperty("SUPABASE_URL").orNull ?: localProps.getProperty("SUPABASE_URL", "")}\"")
+        buildConfigField("String", "SUPABASE_ANON_KEY", "\"${providers.gradleProperty("SUPABASE_ANON_KEY").orNull ?: localProps.getProperty("SUPABASE_ANON_KEY", "")}\"")
     }
 
     signingConfigs {
