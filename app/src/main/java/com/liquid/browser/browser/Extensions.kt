@@ -315,7 +315,7 @@ extension:{getURL:function(p){return B+String(p).replace(/^\//,'')}}}})()"""
         val key = JSONObject.quote("__oreaGM:" + dirName(ext.id))
         val info = JSONObject().put("script", JSONObject().put("name", ext.name).put("version", ext.version)).put("scriptHandler", "Orea").put("version", "1")
         return """(function(){var K=$key;function ld(){try{return JSON.parse(localStorage.getItem(K)||'{}')}catch(e){return{}}}function sv(o){try{localStorage.setItem(K,JSON.stringify(o))}catch(e){}}
-var add=function(t){var s=document.createElement('style');s.textContent=t;(document.head||document.documentElement).appendChild(s);return s};
+var add=function(t){var s=document.createElement('style');s.textContent=t;(function a(){var p=document.head||document.documentElement;p?p.appendChild(s):setTimeout(a,10)})();return s};
 var get=function(k,d){var o=ld();return k in o?o[k]:d},set=function(k,v){var o=ld();o[k]=v;sv(o)},del=function(k){var o=ld();delete o[k];sv(o)},keys=function(){return Object.keys(ld())};
 var xhr=function(d){fetch(d.url,{method:d.method||'GET',headers:d.headers,body:d.data,credentials:d.anonymous?'omit':'include'}).then(function(r){return r.text().then(function(t){var x={status:r.status,statusText:r.statusText,responseText:t,response:t,finalUrl:r.url,readyState:4,responseHeaders:''};
 if(d.responseType==='json'){try{x.response=JSON.parse(t)}catch(e){}}d.onload&&d.onload(x)})}).catch(function(e){d.onerror&&d.onerror(e)});return{abort:function(){}}};

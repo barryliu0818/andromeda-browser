@@ -142,7 +142,7 @@ object AdBlocker {
         return buildString {
             if (!res.optBoolean("generichide")) append(COSMETIC_JS)
             if (css.isNotEmpty()) append("(function(){var s=document.createElement('style');s.textContent=")
-                .append(org.json.JSONObject.quote(css)).append(";(document.head||document.documentElement).appendChild(s)})();")
+                .append(org.json.JSONObject.quote(css)).append(";(function add(){var p=document.head||document.documentElement;p?p.appendChild(s):setTimeout(add,10)})()})();")
             res.optString("injected_script").takeIf { it.isNotBlank() }?.let { append("try{").append(it).append("}catch(e){}") }
         }
     }
@@ -197,7 +197,8 @@ object AdBlocker {
       s.textContent = 'ins.adsbygoogle,[id^="google_ads"],[id^="div-gpt-ad"],iframe[src*="doubleclick.net"],iframe[src*="googlesyndication"],' +
         '[class*="ad-banner"],[class*="adsbox"],[id*="ad-container"],[class*="sponsored-"],.ad-slot,.adsense,[data-ad-slot],[data-google-query-id],' +
         'a[href*="pos.baidu.com"],iframe[src*="pos.baidu.com"],[id^="cpro_"],iframe[src*="tanx.com"]{display:none!important}';
-      (document.head || document.documentElement).appendChild(s);
+      // 頁面剛開始載入時文件可能還沒有根元素：等它出現再加（以前直接 appendChild 會丟錯，這次載入就沒隱藏）
+      (function add(){ var p = document.head || document.documentElement; if (p) p.appendChild(s); else setTimeout(add, 10); })();
     })();"""
 }
 

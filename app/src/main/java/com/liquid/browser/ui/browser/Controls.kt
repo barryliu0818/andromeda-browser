@@ -558,17 +558,35 @@ internal fun EngineIcon(engine: SearchEngine, size: Dp) {
     }
 }
 
-/** 沿膠囊底緣的藍色進度線：平滑增長，完成時淡出。只改 graphicsLayer，不重新排版。 */
+/**
+ * 沿膠囊底緣的藍色進度線，照 Chromium（Brave）的 ToolbarProgressBar：開始載入立刻露出一小段、平滑增長且不倒退，
+ * 完成時先補滿再淡出（以前一到 100 就開始淡出，看起來停在半路就消失；重新載入時還會從滿格往回縮）。
+ * 只改 graphicsLayer，不重新排版。
+ */
 @Composable
 internal fun Progress(progress: Int, accent: Color, modifier: Modifier) {
     val loading = progress < 100
-    val alpha by animateFloatAsState(if (loading) 1f else 0f, tween(if (loading) 0 else 400), label = "pa")
-    val frac by animateFloatAsState(progress / 100f, Motion.standard(), label = "pf")
+    val frac = remember { androidx.compose.animation.core.Animatable(0f) }
+    val alpha = remember { androidx.compose.animation.core.Animatable(if (loading) 1f else 0f) }
+    LaunchedEffect(loading) {
+        if (loading) {
+            // 新的一次載入：從頭開始，不從上一次的滿格往回縮
+            if (alpha.value < 1f || frac.value >= 1f) frac.snapTo(0f)
+            alpha.snapTo(1f)
+        } else if (alpha.value > 0f) {
+            frac.animateTo(1f, tween(200))
+            kotlinx.coroutines.delay(100)
+            alpha.animateTo(0f, tween(300))
+        }
+    }
+    LaunchedEffect(progress) {
+        if (loading) frac.animateTo(maxOf(frac.value, progress / 100f, 0.05f), Motion.standard())
+    }
     Box(
         modifier.padding(horizontal = 18.dp).fillMaxWidth().height(2.dp)
             .graphicsLayer {
-                this.alpha = alpha
-                scaleX = frac
+                this.alpha = alpha.value
+                scaleX = frac.value
                 transformOrigin = TransformOrigin(0f, 0.5f)
             }
             .background(accent, CircleShape),
