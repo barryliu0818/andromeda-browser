@@ -377,6 +377,8 @@ class Tab(
                 }
                 // 跳轉阻擋（照 Brave：只看目的地是不是廣告／追蹤網站，不看「是不是點連結」）：
                 // 以前點按鈕跳到別的網站（登入、付款）、載入後網頁自己轉址都一律擋，正常功能也被擋掉
+                // 彈窗裡的轉址是廣告：關掉整個彈窗回原頁（以前只擋轉址，使用者被留在空白彈窗、進不去要的網頁）
+                if (popupCheck && popupIsAd(request.url.toString())) { listener.onPopupAd(this@Tab, request.url.toString()); return true }
                 val target = request.url.host.orEmpty()
                 if (target.isNotEmpty() && !isBlank && pageHost.isNotEmpty() && baseDomain(target) != baseDomain(pageHost) &&
                     (listener.blockRedirects() || blocksTrackers(pageHost)) && AdBlocker.isAdNavigation(request.url.toString(), pageHost)
@@ -433,11 +435,8 @@ class Tab(
 
             override fun onPageStarted(view: WebView, u: String, icon: Bitmap?) {
                 // 點擊開出來的彈窗：第一個真正的網址（about:blank 之後）是廣告網站就關掉
-                if (popupCheck && u.startsWith("http")) {
-                    popupCheck = false
-                    val from = opener?.pageHost.orEmpty()
-                    if (AdBlocker.isAdNavigation(u, from)) { view.stopLoading(); listener.onPopupAd(this@Tab, u); return }
-                }
+                // 點擊開出來的彈窗：使用者碰它之前，任何一步（含網站自己的 pop?url=廣告 中轉頁）是廣告就關掉、回原頁
+                if (popupCheck && popupIsAd(u)) { view.stopLoading(); listener.onPopupAd(this@Tab, u); return }
                 pageStartedAt = android.os.SystemClock.uptimeMillis()
                 media.clear()
                 blockedCount = 0
@@ -575,6 +574,7 @@ class Tab(
         webView.setOnTouchListener { _, e ->
             touchX = e.x
             touchY = e.y
+            if (e.actionMasked == android.view.MotionEvent.ACTION_DOWN) popupCheck = false
             touching = e.actionMasked != android.view.MotionEvent.ACTION_UP && e.actionMasked != android.view.MotionEvent.ACTION_CANCEL
             // 手指按下時把 Android 的焦點交給 WebView：放在 Compose 裡的 WebView，在網址列、面板等 Compose 元件拿過焦點後，
             // 點網頁輸入框不會自己拿回焦點（網頁裡已經 focus，但系統不知道要給哪個 View 鍵盤），Google 搜尋框點了不出鍵盤
@@ -842,6 +842,15 @@ class Tab(
     }
 
     /** 擋下廣告點擊後，讓蓋在影片上的透明廣告層點擊穿透（video_detect.js 的 __lqUnblock） */
+    /** 彈窗網址（或它參數裡夾帶的網址）是廣告 */
+    private fun popupIsAd(u: String): Boolean {
+        if (!u.startsWith("http")) return false
+        val from = opener?.pageHost.orEmpty()
+        val uri = android.net.Uri.parse(u)
+        val inner = runCatching { uri.queryParameterNames.mapNotNull { uri.getQueryParameter(it) }.filter { it.startsWith("http") } }.getOrDefault(emptyList())
+        return (listOf(u) + inner).any { AdBlocker.isAdNavigation(it, from) }
+    }
+
     fun unblockLastTap() = webView.evaluateJavascript("window.__lqUnblock&&window.__lqUnblock()", null)
 
     /** 下拉重新整理：目前下拉距離（px，未阻尼）與是否正在重新整理（轉圈直到載入完成） */
