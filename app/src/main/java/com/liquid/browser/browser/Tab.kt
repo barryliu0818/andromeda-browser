@@ -381,7 +381,7 @@ class Tab(
                 if (popupCheck && popupIsAd(request.url.toString())) { listener.onPopupAd(this@Tab, request.url.toString()); return true }
                 val target = request.url.host.orEmpty()
                 if (target.isNotEmpty() && !isBlank && pageHost.isNotEmpty() && baseDomain(target) != baseDomain(pageHost) &&
-                    (listener.blockRedirects() || blocksTrackers(pageHost)) && AdBlocker.isAdNavigation(request.url.toString(), pageHost)
+                    listener.blockRedirects() && AdBlocker.isAdNavigation(request.url.toString(), pageHost)
                 ) {
                     if (request.hasGesture()) listener.onAdClickBlocked(this@Tab, request.url.toString())
                     else listener.onRedirectBlocked(this@Tab, request.url.toString())
@@ -542,7 +542,10 @@ class Tab(
                 if (!listener.nativeFullscreen()) return listener.onCustomView(view, callback)
                 webView.evaluateJavascript(FULLSCREEN_VIDEO_JS) { r ->
                     val json = runCatching { org.json.JSONObject(org.json.JSONTokener(r).nextValue() as String) }.getOrNull()
-                    val src = json?.optString("src")?.takeIf { it.startsWith("http") } ?: media.lastOrNull()
+                    // 網頁播放器是 blob:（hls.js／MSE）：串流網址多半綁了網頁的權杖，原生播放器去抓會 403；直接用網頁自己的全螢幕
+                    // （以前改用偵測到的最後一個影片網址，常是旁邊的廣告影片，或被 CDN 拒絕）
+                    val src = json?.optString("src")?.takeIf { it.startsWith("http") }
+                        ?: media.lastOrNull()?.takeIf { json?.optString("src").isNullOrEmpty() }
                     if (src == null) return@evaluateJavascript listener.onCustomView(view, callback)
                     callback.onCustomViewHidden()
                     listener.onNativeVideo(this@Tab, src, json?.optString("title").orEmpty().ifBlank { title }, null, ((json?.optDouble("time", 0.0) ?: 0.0) * 1000).toLong())
@@ -554,7 +557,8 @@ class Tab(
             override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message): Boolean {
                 // 沒有點擊就開的彈窗一律不開（同 Chrome／Brave）；有點擊的照開（登入、付款視窗常是按鈕開的），
                 // 開出來的第一頁是廣告網站才關掉（見 onPageStarted 的 popupCheck）
-                if (!isUserGesture) return false
+                // 使用者關掉「阻止跳轉」：沒點擊的彈窗也照開
+                if (!isUserGesture && listener.blockRedirects()) return false
                 val popup = listener.onPopup(this@Tab)
                 popup.popupCheck = true
                 (resultMsg.obj as? WebView.WebViewTransport)?.webView = popup.webView
@@ -1170,6 +1174,7 @@ private const val FULLSCREEN_VIDEO_JS = """(function(){
   var v = f && (f.tagName === 'VIDEO' ? f : f.querySelector && f.querySelector('video'));
   if (!v) { var all = Array.prototype.slice.call(document.querySelectorAll('video')); v = all.filter(function(x){ return !x.paused; })[0] || all[0]; }
   if (!v) return null;
-  try { v.pause(); } catch (e) {}
-  return JSON.stringify({ src: v.currentSrc || v.src || '', time: v.currentTime || 0, title: document.title || '' });
+  var s = v.currentSrc || v.src || '';
+  if (/^https?:/.test(s)) try { v.pause(); } catch (e) {}
+  return JSON.stringify({ src: s, time: v.currentTime || 0, title: document.title || '' });
 })()"""

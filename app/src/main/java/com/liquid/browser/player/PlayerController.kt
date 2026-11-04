@@ -81,7 +81,11 @@ class PlayerController(
 
     init {
         val headers = buildMap {
-            request.referer?.let { put("Referer", it) }
+            request.referer?.let {
+                put("Referer", it)
+                // hls.js 等網頁播放器用 XHR 抓串流，會帶 Origin；不少影片 CDN 沒有 Origin 就回 403
+                android.net.Uri.parse(it).let { u -> if (u.scheme != null && u.host != null) put("Origin", "${u.scheme}://${u.host}") }
+            }
             request.cookies?.let { put("Cookie", it) }
         }
         val http = DefaultHttpDataSource.Factory()
