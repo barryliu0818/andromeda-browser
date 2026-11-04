@@ -150,6 +150,7 @@ fun PlayerScreen(c: PlayerController, inPip: Boolean, onVideoBounds: (android.gr
 
     // 隱藏系統列；離開時恢復並解除方向鎖定
     DisposableEffect(Unit) {
+        releasePortraitHold(activity)
         val controller = activity?.window?.let { WindowCompat.getInsetsController(it, view) }
         controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         controller?.hide(WindowInsetsCompat.Type.systemBars())
@@ -436,15 +437,27 @@ private fun PlayerGlass(haze: HazeState, modifier: Modifier, onClick: (() -> Uni
  * 離開播放器：網頁回到直向（即使手機還橫拿著）。等手機真的轉回直向才解除鎖定，之後照常可以轉橫向瀏覽；
  * 不立刻解除是因為手還橫拿著時，系統會馬上又把網頁轉回橫向
  */
-private fun backToPortrait(activity: android.app.Activity) {
+internal fun backToPortrait(activity: android.app.Activity) {
+    val main = activity as? com.liquid.browser.MainActivity
     activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT
+    // 轉回直向前擋下網頁核心晚到的轉向（screen.orientation.unlock）：見 MainActivity.holdPortrait
+    main?.holdPortrait = true
+    val release = {
+        main?.holdPortrait = false
+        if (activity.requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT)
+            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    }
     val listener = object : android.view.OrientationEventListener(activity) {
         override fun onOrientationChanged(deg: Int) {
             if (deg == ORIENTATION_UNKNOWN || (deg in 30..330)) return
             disable()
-            if (activity.requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT)
-                activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            release()
         }
     }
-    if (listener.canDetectOrientation()) listener.enable() else activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    if (listener.canDetectOrientation()) listener.enable() else release()
+}
+
+/** 播放器或網頁全螢幕開始：不再只限直向（允許轉橫向） */
+internal fun releasePortraitHold(activity: android.app.Activity?) {
+    (activity as? com.liquid.browser.MainActivity)?.holdPortrait = false
 }

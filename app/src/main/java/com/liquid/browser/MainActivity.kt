@@ -198,6 +198,25 @@ class MainActivity : ComponentActivity() {
             .build()
     }
 
+    /**
+     * 關掉播放器後、手機轉回直向前（[com.liquid.browser.player.backToPortrait]）：只接受直向。
+     * 影片網站全螢幕時會 screen.orientation.lock／unlock，網頁核心直接改 Activity 方向，晚到的 unlock 會把剛轉回的直向又改成橫向。
+     */
+    var holdPortrait = false
+
+    override fun setRequestedOrientation(requestedOrientation: Int) {
+        val portrait = requestedOrientation == android.content.pm.ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT ||
+            requestedOrientation == android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        // 方向變更與呼叫來源都記下：轉向問題直接看紀錄（網頁核心的呼叫來自 org.chromium）
+        val caller = Thread.currentThread().stackTrace.getOrNull(3)?.let { "${it.className.substringAfterLast('.')}.${it.methodName}" }.orEmpty()
+        if (holdPortrait && !portrait) {
+            BugLog.event("orientation", "擋下 $requestedOrientation（等手機轉回直向）from $caller")
+            return
+        }
+        BugLog.event("orientation", "$requestedOrientation from $caller")
+        super.setRequestedOrientation(requestedOrientation)
+    }
+
     /** Android 11 以下沒有自動進入：按 Home 離開時手動進入子母畫面。 */
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()

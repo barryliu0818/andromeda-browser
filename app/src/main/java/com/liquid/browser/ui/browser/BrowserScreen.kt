@@ -924,10 +924,12 @@ fun BrowserScreen(vm: BrowserViewModel) {
                     controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                     controller?.hide(WindowInsetsCompat.Type.systemBars())
                     // 不強制轉向：跟著手機方向（使用者自己轉手機）
+                    com.liquid.browser.player.releasePortraitHold(activity)
                     activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_USER
                     onDispose {
                         controller?.show(WindowInsetsCompat.Type.systemBars())
-                        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                        // 跟關掉原生播放器一樣：網頁回到直向，手機轉回直向後才解除
+                        activity?.let { com.liquid.browser.player.backToPortrait(it) }
                     }
                 }
                 Box(Modifier.fillMaxSize().background(Color.Black)) {
