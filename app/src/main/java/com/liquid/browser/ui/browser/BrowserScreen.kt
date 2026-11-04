@@ -409,19 +409,23 @@ fun BrowserScreen(vm: BrowserViewModel) {
                             // 依位置或甩動速度決定；速度方向必須與拖曳方向一致
                             val goRight = swipe.value < 0 && (swipe.value < -w * 0.3f || velocity.x < -900f)
                             val goLeft = left != null && swipe.value > 0 && (swipe.value > w * 0.3f || velocity.x > 900f)
+                            // 彈簧接手指放開時的速度（Chromium 的 ToolbarSwipeLayout 也是）：甩出去不會先頓一下才加速
+                            val v = velocity.x
+                            // 甩得很快時臨界阻尼彈簧會衝過頭：到一個螢幕寬就停
+                            swipe.updateBounds(-w, w)
                             when {
                                 goRight -> {
-                                    swipe.animateTo(-w, Motion.standard())
+                                    swipe.animateTo(-w, Motion.standard(), v)
                                     haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
                                     // 最後一個分頁繼續往左滑：建立新分頁
                                     vm.neighbor(1)?.let(vm::select) ?: vm.newTab()
                                 }
                                 goLeft -> {
-                                    swipe.animateTo(w, Motion.standard())
+                                    swipe.animateTo(w, Motion.standard(), v)
                                     haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
                                     vm.select(left)
                                 }
-                                else -> swipe.animateTo(0f, Motion.glass())
+                                else -> swipe.animateTo(0f, Motion.standard(), v)
                             }
                         }
                         2 -> if (lift.value > 0.3f || velocity.y < -900f) {
@@ -433,7 +437,7 @@ fun BrowserScreen(vm: BrowserViewModel) {
                             val top = (size.y - h) / 2 - 0.06f * size.y * l
                             enterOverview(Rect(left, top, left + w, top + h))
                             lift.snapTo(0f)
-                        } else lift.animateTo(0f, Motion.glass())
+                        } else lift.animateTo(0f, Motion.standard(), -velocity.y / (size.y * 0.45f))
                     }
                 }
             }
