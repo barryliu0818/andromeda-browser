@@ -49,3 +49,48 @@ object LinkCleaner {
         return uri.buildUpon().encodedQuery(kept.joinToString("&").ifEmpty { null }).build().toString()
     }
 }
+
+/**
+ * 跳過追蹤跳轉頁（Brave 的 debounce）：連結先經過 Google、Facebook、知乎、微博…的轉址頁記錄你點了什麼才跳過去；
+ * 網址裡已經帶著真正的目的地，直接開目的地。
+ */
+object Debounce {
+    /** 主網域 + 路徑開頭 → 放目的地的參數名稱 */
+    private val Rules = listOf(
+        Triple("google.com", "/url", listOf("q", "url")),
+        Triple("facebook.com", "/l.php", listOf("u")),
+        Triple("youtube.com", "/redirect", listOf("q")),
+        Triple("zhihu.com", "/", listOf("target")),           // link.zhihu.com/?target=
+        Triple("weibo.cn", "/sinaurl", listOf("u", "toasturl")),
+        Triple("jianshu.com", "/go-wild", listOf("url")),
+        Triple("douban.com", "/link2", listOf("url")),
+        Triple("csdn.net", "/", listOf("target")),            // link.csdn.net/?target=
+        Triple("juejin.cn", "/", listOf("target")),           // link.juejin.cn/?target=
+        Triple("steamcommunity.com", "/linkfilter", listOf("url", "u")),
+        Triple("reddit.com", "/", listOf("url")),             // out.reddit.com/…?url=
+        Triple("vk.com", "/away.php", listOf("to")),
+        Triple("instagram.com", "/", listOf("u")),            // l.instagram.com/?u=
+    )
+
+    /** 回傳真正的目的地；不是追蹤跳轉頁就回傳 null */
+    fun target(url: String): String? {
+        if (!url.startsWith("http") || '?' !in url) return null
+        // 用 java.net.URI（單元測試也能跑）；查詢參數自己拆、解碼
+        val uri = runCatching { java.net.URI(url) }.getOrNull() ?: return null
+        val host = uri.host.orEmpty().lowercase()
+        val path = uri.rawPath.orEmpty().ifEmpty { "/" }
+        val query = uri.rawQuery.orEmpty().split('&').mapNotNull { p ->
+            val k = p.substringBefore('=', "")
+            if (k.isEmpty()) null else k to runCatching { java.net.URLDecoder.decode(p.substringAfter('='), "UTF-8") }.getOrDefault("")
+        }.toMap()
+        for ((domain, prefix, params) in Rules) {
+            if (host != domain && !host.endsWith(".$domain")) continue
+            if (!path.startsWith(prefix)) continue
+            // 知乎、CSDN、掘金、Instagram 的轉址在子網域（link.／l.／out.）上，主站同名參數不碰
+            if (prefix == "/" && host.substringBefore('.') !in setOf("link", "l", "out")) continue
+            val dest = params.firstNotNullOfOrNull { query[it] } ?: continue
+            if (dest.startsWith("https://") || dest.startsWith("http://")) return dest
+        }
+        return null
+    }
+}

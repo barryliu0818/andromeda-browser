@@ -90,6 +90,8 @@ class Tab(
 
         /** 是否允許第三方 Cookie（設定；預設不允許） */
         fun allowThirdPartyCookies(): Boolean
+        /** Brave 式防追蹤（防指紋、跳過追蹤跳轉頁、HTTPS 升級）是否開啟 */
+        fun shields(): Boolean
 
         /** 是否阻止未經點擊的跨站跳轉 */
         fun blockRedirects(): Boolean
@@ -148,6 +150,16 @@ class Tab(
         private set
     private var iosShim: ScriptHandler? = null
     private var extHandler: ScriptHandler? = null
+    private var shieldsHandler: ScriptHandler? = null
+    /** HTTPS 升級後的網址（連不上時退回 http 用） */
+    private var upgraded: String? = null
+
+    /** 防指紋腳本（Brave 式防追蹤開關改變時重新註冊；無痕分頁也套用） */
+    fun applyShields(on: Boolean) {
+        shieldsHandler?.remove()
+        shieldsHandler = null
+        if (on && !legacyInject) shieldsHandler = WebViewCompat.addDocumentStartJavaScript(webView, Shields.fingerprintJs, setOf("*"))
+    }
 
     /** 擴充功能的開頁腳本（安裝、移除、開關後重新註冊）。無痕分頁不跑擴充，跟 Firefox 的預設一樣 */
     fun applyExtensions() {
@@ -387,7 +399,11 @@ class Tab(
                 rememberShownPage()
                 val raw = request.url.toString()
                 // 連結追蹤保護：拿掉網址上的追蹤參數再開（伺服器轉址不處理：網站轉回帶參數的網址時才不會來回打轉）
-                val clean = if (request.method == "GET" && !request.isRedirect && listener.cleanLinks(this@Tab)) LinkCleaner.clean(raw) else raw
+                val cleaned = if (request.method == "GET" && !request.isRedirect && listener.cleanLinks(this@Tab)) LinkCleaner.clean(raw) else raw
+                // Brave 式防追蹤：追蹤跳轉頁直接開目的地；http 先試 https（伺服器轉址不升級，免得網站轉回 http 時來回打轉）
+                val clean = if (request.method == "GET" && !request.isRedirect && listener.shields())
+                    Debounce.target(cleaned) ?: Shields.upgrade(cleaned)?.also { upgraded = it } ?: cleaned
+                else cleaned
                 // 要去的網站身分不同（例如從一般網站點進 YouTube）：切換後自己重新發出這個請求
                 val switched = request.method == "GET" && switchIdentityFor(clean)
                 if (switched || clean !== raw) {
@@ -439,6 +455,7 @@ class Tab(
                 if (listener.adBlockFor(pageHost)) view.evaluateJavascript(AdBlocker.cosmeticJs(u), null)
                 // 舊版 WebView 沒有開頁腳本：擴充改在這裡注入（只有最上層頁面）
                 if (legacyInject && !incognito) Extensions.documentStartScript()?.let { view.evaluateJavascript(it, null) }
+                if (legacyInject && listener.shields()) view.evaluateJavascript(Shields.fingerprintJs, null)
                 translated = false
                 trTarget = null
                 trSent = 0
@@ -457,7 +474,19 @@ class Tab(
                 if (request.isForMainFrame) com.liquid.browser.BugLog.limited("http", "${response.statusCode} ${request.url}")
             }
 
+            // HTTPS 升級後憑證有問題：這個網站其實只有 http，退回 http（記住，這次開 App 期間不再升級）
+            override fun onReceivedSslError(view: WebView, handler: android.webkit.SslErrorHandler, error: android.net.http.SslError) {
+                handler.cancel()
+                val u = error.url.orEmpty()
+                if (upgraded != null && Uri.parse(u).host == Uri.parse(upgraded).host) { upgraded = null; view.loadUrl(Shields.fallback(u)) }
+            }
+
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                // HTTPS 升級後連不上（網站沒開 443、拒絕連線）：退回 http
+                val u = request.url.toString()
+                if (request.isForMainFrame && upgraded != null && u.startsWith("https://") && Uri.parse(u).host == Uri.parse(upgraded).host &&
+                    error.errorCode in setOf(ERROR_CONNECT, ERROR_TIMEOUT, ERROR_FAILED_SSL_HANDSHAKE)
+                ) { upgraded = null; view.loadUrl(Shields.fallback(u)); return }
                 if (request.isForMainFrame) {
                     loadFailed = true
                     com.liquid.browser.BugLog.event("load", "${error.errorCode} ${error.description} ${request.url}")
@@ -542,6 +571,7 @@ class Tab(
         }
         installVideoBridge()
         applyExtensions()
+        applyShields(listener.shields())
         webView.setOnScrollChangeListener { v, _, y, _, oldY ->
             listener.onScroll(this, y - oldY, !v.canScrollVertically(1))
         }
@@ -641,6 +671,7 @@ class Tab(
 
     fun load(input: String) {
         val target = toUrl(input, listener.searchPrefix()).let { if (listener.cleanLinks(this)) LinkCleaner.clean(it) else it }
+            .let { if (listener.shields()) Debounce.target(it) ?: Shields.upgrade(it)?.also { u -> upgraded = u } ?: it else it }
         if (isMediaUrl(target) && listener.onMediaUrl(this, target, typed = true)) return
         rememberShownPage()
         url = target

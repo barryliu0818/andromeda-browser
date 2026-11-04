@@ -348,26 +348,33 @@ fun SettingsContent(vm: BrowserViewModel, tone: Tone) {
         // 隱私與安全
         item { GroupHeader(t("隱私與安全"), tone) }
         item {
-            GroupToggle(0, 4, tone, t("阻擋廣告與追蹤"), s.adBlock, subtitle = if (AdBlocker.usingEngine) t("Brave 攔截引擎（EasyList 等清單）・%1\$s 條規則", "%,d".format(AdBlocker.ruleCount))
+            GroupToggle(0, 5, tone, t("阻擋廣告與追蹤"), s.adBlock, subtitle = if (AdBlocker.usingEngine) t("Brave 攔截引擎（EasyList 等清單）・%1\$s 條規則", "%,d".format(AdBlocker.ruleCount))
                 else t("類似 AdGuard 的過濾清單・%1\$s 條規則", "%,d".format(AdBlocker.ruleCount)), leading = { IconTile("block", red) }) { v ->
                 vm.updateSettings { it.copy(adBlock = v) }
             }
         }
         item {
-            GroupToggle(1, 4, tone, t("阻止自動跳轉"), s.blockRedirects, subtitle = t("網頁未經點擊就跳到其他網站時阻擋"), leading = { IconTile("alt_route", Color(0xFFFF9500)) }) { v ->
+            GroupToggle(1, 5, tone, t("阻止自動跳轉"), s.blockRedirects, subtitle = t("網頁未經點擊就跳到其他網站時阻擋"), leading = { IconTile("alt_route", Color(0xFFFF9500)) }) { v ->
                 vm.updateSettings { it.copy(blockRedirects = v) }
             }
         }
         item {
             // 第三方 Cookie：嵌在別的網站裡（廣告、分享鈕、追蹤像素）用來跨網站認出你；少數網站的嵌入登入會需要它
-            GroupToggle(2, 4, tone, t("封鎖第三方 Cookie"), s.blockThirdPartyCookies, subtitle = t("防止跨網站追蹤"), leading = { IconTile("cookie", Color(0xFF8E8E93)) }) { v ->
+            GroupToggle(2, 5, tone, t("封鎖第三方 Cookie"), s.blockThirdPartyCookies, subtitle = t("防止跨網站追蹤"), leading = { IconTile("cookie", Color(0xFF8E8E93)) }) { v ->
                 vm.updateSettings { it.copy(blockThirdPartyCookies = v) }
             }
         }
         item {
+            // Brave 的 Shields：防指紋、跳過追蹤跳轉頁、HTTPS 升級、GPC
+            GroupToggle(
+                3, 5, tone, t("Brave 防追蹤保護"), s.shields, subtitle = t("防指紋追蹤・跳過追蹤跳轉頁・自動改用 HTTPS"),
+                leading = { IconTile("shield", Color(0xFFFF6000)) },
+            ) { v -> vm.updateSettings { it.copy(shields = v) } }
+        }
+        item {
             // 連結追蹤保護（Safari）：拿掉 utm_、fbclid、gclid 等追蹤參數；無痕分頁一律套用
             GroupMenuRow(
-                3, 4, tone, t("移除網址追蹤參數"), listOf(t("僅無痕瀏覽"), t("所有瀏覽")), if (s.cleanLinksEverywhere) 1 else 0,
+                4, 5, tone, t("移除網址追蹤參數"), listOf(t("僅無痕瀏覽"), t("所有瀏覽")), if (s.cleanLinksEverywhere) 1 else 0,
                 subtitle = t("例如 utm_、fbclid、gclid"),
                 leading = { IconTile("link_off", Color(0xFF34C759)) },
             ) { i -> vm.updateSettings { it.copy(cleanLinksEverywhere = i == 1) } }

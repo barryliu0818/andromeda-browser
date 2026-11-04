@@ -58,6 +58,8 @@ data class Settings(
     val blockThirdPartyCookies: Boolean = true,
     /** 所有瀏覽都拿掉網址上的追蹤參數（關閉時只有無痕分頁拿掉，同 Safari） */
     val cleanLinksEverywhere: Boolean = false,
+    /** Brave 式防追蹤：防指紋（canvas／音訊／CPU 核心數加入每個網站不同的雜訊）、跳過追蹤跳轉頁、HTTPS 升級、GPC 訊號 */
+    val shields: Boolean = true,
     /** 常用網站：使用者加入或編輯過的（排在最前面，順序固定），每筆是 名稱 to 網址 */
     val favorites: List<Pair<String, String>> = emptyList(),
     /** 從常用網站刪掉的網域：就算之後常去也不再自動出現 */
@@ -94,6 +96,7 @@ class SettingsStore(private val context: Context) {
         val barTop = booleanPreferencesKey("address_bar_top")
         val layout = stringPreferencesKey("bar_layout")
         val tpc = booleanPreferencesKey("block_third_party_cookies")
+        val shields = booleanPreferencesKey("shields")
         val cleanAll = booleanPreferencesKey("clean_links_everywhere")
         val favs = stringPreferencesKey("favorites")
         val hiddenFavs = stringSetPreferencesKey("hidden_favorites")
@@ -126,6 +129,7 @@ class SettingsStore(private val context: Context) {
         barLayout = this[K.layout]?.let { runCatching { BarLayout.valueOf(it) }.getOrNull() } ?: if (this[K.barTop] == true) BarLayout.Top else BarLayout.Compact,
         blockThirdPartyCookies = this[K.tpc] ?: true,
         cleanLinksEverywhere = this[K.cleanAll] ?: false,
+        shields = this[K.shields] ?: true,
         favorites = this[K.favs]?.let { j -> runCatching { org.json.JSONArray(j).let { a -> List(a.length()) { i -> a.getJSONArray(i).let { it.getString(0) to it.getString(1) } } } }.getOrNull() }.orEmpty(),
         hiddenFavorites = this[K.hiddenFavs] ?: emptySet(),
         appLang = this[K.appLang]?.let { runCatching { com.liquid.browser.core.AppLang.valueOf(it) }.getOrNull() } ?: com.liquid.browser.core.AppLang.System,
@@ -153,6 +157,7 @@ class SettingsStore(private val context: Context) {
             p.remove(K.barTop)
             p[K.tpc] = n.blockThirdPartyCookies
             p[K.cleanAll] = n.cleanLinksEverywhere
+            p[K.shields] = n.shields
             p[K.favs] = org.json.JSONArray(n.favorites.map { (t, u) -> org.json.JSONArray(listOf(t, u)) }).toString()
             p[K.hiddenFavs] = n.hiddenFavorites
             p[K.appLang] = n.appLang.name

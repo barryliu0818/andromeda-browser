@@ -43,6 +43,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -275,6 +276,10 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         // 「封鎖第三方 Cookie」改變時套用到所有已開啟的分頁
         viewModelScope.launch {
             settings.map { it.blockThirdPartyCookies }.distinctUntilChanged().collect { block -> tabs.forEach { it.setThirdPartyCookies(!block) } }
+        }
+        // 「Brave 防追蹤」開關改變時重新註冊防指紋腳本
+        viewModelScope.launch {
+            settings.map { it.shields }.distinctUntilChanged().drop(1).collect { on -> tabs.forEach { it.applyShields(on) } }
         }
     }
 
@@ -720,6 +725,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     override fun cleanLinks(tab: Tab): Boolean = tab.incognito || settings.value.cleanLinksEverywhere
 
     override fun allowThirdPartyCookies(): Boolean = !settings.value.blockThirdPartyCookies
+    override fun shields(): Boolean = settings.value.shields
 
     override fun blockRedirects() = settings.value.blockRedirects
 
