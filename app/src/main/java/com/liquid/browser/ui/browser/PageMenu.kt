@@ -79,10 +79,8 @@ class PageMenuActions(
     val onDownloads: () -> Unit,
     val onSiteSettings: () -> Unit,
     val onSettings: () -> Unit,
-    /** 用戶中心：登入、註冊、忘記密碼 */
-    val onUserCenter: () -> Unit,
-    /** 回報問題：截圖＋當下狀態存進問題紀錄（BugLog） */
-    val onReport: () -> Unit,
+    /** 擴展工具管理：已安裝的擴充功能、從網址安裝 */
+    val onExtensions: () -> Unit,
 )
 
 /**
@@ -92,7 +90,7 @@ class PageMenuActions(
  * 起始頁沒有網頁：… 直接是資料庫選單。
  */
 fun pageMenu(anchor: Rect, tab: Tab, vm: BrowserViewModel, tone: Tone, context: Context, actions: PageMenuActions) =
-    if (tab.isBlank) libraryMenu(anchor, actions, withReport = true, anchorIcon = "menu")
+    if (tab.isBlank) libraryMenu(anchor, actions, anchorIcon = "menu")
     else MenuSpec(
         anchor = anchor,
         anchorIcon = "menu",
@@ -109,23 +107,22 @@ fun pageMenu(anchor: Rect, tab: Tab, vm: BrowserViewModel, tone: Tone, context: 
                     context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
                 vm.showToast(if (top) t("點擊畫面頂部可叫回控制項") else t("點擊畫面底部可叫回控制項"))
             },
-            MenuItem(t("回報問題"), "bug_report") { actions.onReport() },
+            MenuItem(t("擴展工具管理"), "extension", push = true) { actions.onExtensions() },
             // 設定要隨時找得到：不只在分頁總覽的資料庫鈕裡
-            MenuItem(t("用戶中心"), "account_circle", push = true) { actions.onUserCenter() },
             MenuItem(t("設定"), "settings", push = true) { actions.onSettings() },
         ),
     )
 
-/** 資料庫選單（App 層級）：書籤與歷史紀錄、下載項目、設定；起始頁的 … 另外加上回報問題 */
-fun libraryMenu(anchor: Rect, actions: PageMenuActions, withReport: Boolean = false, anchorIcon: String? = null) = MenuSpec(
+/** 資料庫選單（App 層級）：書籤與歷史紀錄、下載項目、擴展工具管理、設定（問題由 BugLog 自動記錄，不另設回報鈕） */
+fun libraryMenu(anchor: Rect, actions: PageMenuActions, anchorIcon: String? = null) = MenuSpec(
     anchor = anchor,
     anchorIcon = anchorIcon,
     items = listOf(
         MenuItem(t("書籤與歷史紀錄"), "book", push = true) { actions.onLibrary() },
         MenuItem(t("下載項目"), "download", push = true) { actions.onDownloads() },
-        MenuItem(t("用戶中心"), "account_circle", push = true) { actions.onUserCenter() },
+        MenuItem(t("擴展工具管理"), "extension", push = true) { actions.onExtensions() },
         MenuItem(t("設定"), "settings", push = true) { actions.onSettings() },
-    ) + if (withReport) listOf(MenuItem(t("回報問題"), "bug_report") { actions.onReport() }) else emptyList(),
+    ),
 )
 
 /** 網址列的翻譯鈕（YouTube）：翻譯網頁與翻譯字幕兩項 */

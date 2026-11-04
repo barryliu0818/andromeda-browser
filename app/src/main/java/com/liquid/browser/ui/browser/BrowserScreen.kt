@@ -450,7 +450,7 @@ fun BrowserScreen(vm: BrowserViewModel) {
     val swiping by remember(tab) { derivedStateOf { swipe.value != 0f } }
     val lifting by remember(tab) { derivedStateOf { lift.value != 0f } }
     val backing by remember(tab) { derivedStateOf { back.value != 0f } }
-    // 當下畫面狀態：手動「回報問題」與自動回報（BugLog.auto）共用
+    // 當下畫面狀態：自動記錄問題（BugLog.auto）時附上
     val screenState: () -> String = {
         buildString {
             appendLine("網址：${tab.url}")
@@ -513,15 +513,7 @@ fun BrowserScreen(vm: BrowserViewModel) {
         onDownloads = { sheet.show(if (menu.pushed) menu.panelRect else null, menu.spec?.anchor) { DownloadsContent(menuTone) } },
         onSiteSettings = { sheet.show(if (menu.pushed) menu.panelRect else null, menu.spec?.anchor) { SiteSettings(tab, vm, menuTone) } },
         onSettings = { sheet.show(if (menu.pushed) menu.panelRect else null, menu.spec?.anchor) { SettingsContent(vm, menuTone) } },
-        onUserCenter = { sheet.show(if (menu.pushed) menu.panelRect else null, menu.spec?.anchor) { com.liquid.browser.ui.account.UserCenter(vm, menuTone) } },
-        onReport = {
-            // 等選單退場動畫結束再截圖，截到的是問題畫面本身
-            scope.launch {
-                delay(450)
-                val state = screenState()
-                activity?.let { a -> com.liquid.browser.BugLog.report(a, state) { n -> vm.showToast(t("已記錄問題 #%1\$s", n)) } }
-            }
-        },
+        onExtensions = { sheet.show(if (menu.pushed) menu.panelRect else null, menu.spec?.anchor) { com.liquid.browser.ui.extensions.ExtensionsPanel(vm, menuTone) } },
     )
     LaunchedEffect(libraryAt) {
         libraryAt?.let { menu.show(libraryMenu(it, pageActions)) }

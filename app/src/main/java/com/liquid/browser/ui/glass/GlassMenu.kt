@@ -231,8 +231,8 @@ fun GlassMenuHost(state: MenuState, haze: HazeState, tone: Tone) {
                     val h = geo.contentH.toFloat()
                     val left = a.center.x > c.maxWidth / 2f
                     geo.up = a.center.y > c.maxHeight / 2f
-                    // 面板與按鈕對齊在「遠離空間較大處」的那個角，往空間大的方向長
-                    val fx = (if (left) a.right - geo.panelW else a.left).coerceIn(margin, c.maxWidth - margin - geo.panelW)
+                    // 按鈕在右半邊：面板右緣對齊按鈕；在左半邊：面板貼齊螢幕左側（不是從按鈕的位置開始，左邊空一截）
+                    val fx = (if (left) a.right - geo.panelW else margin).coerceIn(margin, c.maxWidth - margin - geo.panelW)
                     val fy = (if (geo.up) a.bottom - h else a.top).coerceIn(margin, c.maxHeight - margin - h)
                     geo.final = Rect(fx, fy, fx + geo.panelW, fy + h)
                     state.panelRect = geo.final

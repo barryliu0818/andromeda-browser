@@ -59,6 +59,20 @@ fun UserCenter(vm: BrowserViewModel, tone: Tone) {
     val accent = accent
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 48.dp)) {
         item { PageTitle(t("用戶中心"), tone, Modifier.padding(start = 4.dp)) }
+        // 頂部像 Safari／iOS 的 Apple 帳號頁：大頭像＋名稱＋一句說明
+        item {
+            val email = Account.email
+            Column(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(Modifier.size(76.dp).clip(CircleShape).background(accent.copy(alpha = 0.12f)), Alignment.Center) {
+                    com.liquid.browser.ui.Sym("person", accent, 44.dp)
+                }
+                Text(email ?: t("Orea 帳號"), Modifier.padding(top = 10.dp), color = tone.content, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (email != null) t("已登入・可以使用 AI 翻譯與擴充功能") else t("登入後才能使用 AI 翻譯與安裝擴充功能"),
+                    Modifier.padding(top = 4.dp, start = 24.dp, end = 24.dp), color = Palette.Gray, fontSize = 13.sp, textAlign = TextAlign.Center,
+                )
+            }
+        }
         item {
             val email = Account.email
             when {
@@ -77,10 +91,7 @@ fun UserCenter(vm: BrowserViewModel, tone: Tone) {
                     )
                 }
                 !Account.configured -> GroupRow(0, 1, tone, t("帳號服務尚未設定"), subtitle = t("這個版本沒有編入帳號服務，暫時無法登入"), leading = { IconTile("account_circle", Palette.Gray) })
-                else -> {
-                    Box(Modifier.padding(top = 12.dp)) { Forms(vm, tone, accent) }
-                    GroupFooter(t("登入後才能使用 AI 翻譯與安裝擴充功能"))
-                }
+                else -> Box(Modifier.padding(top = 12.dp)) { Forms(vm, tone, accent) }
             }
         }
     }
@@ -147,13 +158,41 @@ private fun Forms(vm: BrowserViewModel, tone: Tone, accent: Color) {
             }
         }
         val gap = Modifier.padding(top = 8.dp)
-        // 寄出驗證碼後郵箱鎖定；改郵箱就要重寄
-        Field(address, { address = it; if (sentTo != null && it.trim() != sentTo) sentTo = null }, t("郵箱"), tone, accent, KeyboardType.Email, Modifier.padding(top = 10.dp))
+        // 欄位出現／消失（切換模式、寄出驗證碼後多出驗證碼欄）用展開＋淡入，不是瞬間跳出來
+        val show = androidx.compose.animation.expandVertically(com.liquid.browser.core.Motion.standard()) + androidx.compose.animation.fadeIn(com.liquid.browser.core.Motion.timed())
+        val hide = androidx.compose.animation.shrinkVertically(com.liquid.browser.core.Motion.standard()) + androidx.compose.animation.fadeOut(com.liquid.browser.core.Motion.timed(com.liquid.browser.core.Motion.ShortMs))
         val showPassword = mode == Mode.Login || mode == Mode.Register || sentTo != null
-        if (showPassword) Field(password, { password = it }, if (mode == Mode.Reset) t("新密碼") else t("密碼"), tone, accent, KeyboardType.Password, gap)
-        if (mode != Mode.Login && showPassword) Field(again, { again = it }, t("再輸入一次密碼"), tone, accent, KeyboardType.Password, gap)
-        if (mode != Mode.Login && showPassword) Text(t("至少 8 個字元，要有英文字母和數字"), Modifier.padding(top = 4.dp), color = Palette.Gray, fontSize = 12.sp)
-        if (sentTo != null) Field(code, { v -> code = v.filter(Char::isDigit).take(10) }, t("郵件裡的驗證碼"), tone, accent, KeyboardType.NumberPassword, gap)
+        val needAgain = mode != Mode.Login && showPassword
+        // 鍵盤的「下一個」跳到下一欄，最後一欄按「完成」直接送出
+        val lastIsCode = sentTo != null
+        // 寄出驗證碼後郵箱鎖定；改郵箱就要重寄
+        Field(address, { address = it; if (sentTo != null && it.trim() != sentTo) sentTo = null }, t("郵箱"), tone, accent, KeyboardType.Email, Modifier.padding(top = 10.dp), last = !showPassword && !lastIsCode) { submit() }
+        androidx.compose.animation.AnimatedVisibility(showPassword, enter = show, exit = hide) {
+            Field(password, { password = it }, if (mode == Mode.Reset) t("新密碼") else t("密碼"), tone, accent, KeyboardType.Password, gap, last = mode == Mode.Login) { submit() }
+        }
+        androidx.compose.animation.AnimatedVisibility(needAgain, enter = show, exit = hide) {
+            Column {
+                Field(again, { again = it }, t("再輸入一次密碼"), tone, accent, KeyboardType.Password, gap, last = !lastIsCode) { submit() }
+                // 密碼規則即時打勾（不用等按下按鈕才知道哪裡不合格）
+                val rules = listOf(
+                    t("至少 8 個字元") to (password.length >= 8),
+                    t("包含英文字母") to password.any { it in 'a'..'z' || it in 'A'..'Z' },
+                    t("包含數字") to password.any(Char::isDigit),
+                    t("兩次輸入一樣") to (password.isNotEmpty() && password == again),
+                )
+                Column(Modifier.padding(top = 8.dp, start = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    rules.forEach { (label, ok) ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            com.liquid.browser.ui.Sym(if (ok) "check_circle" else "radio_button_unchecked", if (ok) Color(0xFF34C759) else Palette.Gray, 16.dp)
+                            Text(label, Modifier.padding(start = 6.dp), color = if (ok) tone.content else Palette.Gray, fontSize = 13.sp)
+                        }
+                    }
+                }
+            }
+        }
+        androidx.compose.animation.AnimatedVisibility(sentTo != null, enter = show, exit = hide) {
+            Field(code, { v -> code = v.filter(Char::isDigit).take(10) }, t("郵件裡的驗證碼"), tone, accent, KeyboardType.NumberPassword, gap, last = true) { submit() }
+        }
         error?.let { Text(it, Modifier.padding(top = 8.dp), color = Color(0xFFFF3B30), fontSize = 13.sp) }
 
         val label = when {
@@ -192,19 +231,41 @@ private fun Forms(vm: BrowserViewModel, tone: Tone, accent: Color) {
 }
 
 @Composable
-private fun Field(value: String, onChange: (String) -> Unit, hint: String, tone: Tone, accent: Color, type: KeyboardType, modifier: Modifier = Modifier) {
+private fun Field(
+    value: String, onChange: (String) -> Unit, hint: String, tone: Tone, accent: Color, type: KeyboardType,
+    modifier: Modifier = Modifier, last: Boolean = false, onDone: () -> Unit = {},
+) {
     val secret = type == KeyboardType.Password
-    androidx.compose.foundation.text.BasicTextField(
-        value, onChange,
-        modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(tone.content.copy(alpha = 0.06f)).padding(horizontal = 12.dp, vertical = 12.dp),
-        singleLine = true,
-        textStyle = androidx.compose.ui.text.TextStyle(color = tone.content, fontSize = 15.sp),
-        cursorBrush = androidx.compose.ui.graphics.SolidColor(accent),
-        visualTransformation = if (secret) androidx.compose.ui.text.input.PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
-        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = type, imeAction = androidx.compose.ui.text.input.ImeAction.Next),
-        decorationBox = { inner ->
-            if (value.isEmpty()) Text(hint, color = Palette.Gray, fontSize = 15.sp)
-            inner()
-        },
-    )
+    // 密碼欄右邊的眼睛：按一下顯示／隱藏
+    var visible by remember { mutableStateOf(false) }
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
+    Row(
+        modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(tone.content.copy(alpha = 0.06f)),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        androidx.compose.foundation.text.BasicTextField(
+            value, onChange,
+            Modifier.weight(1f).padding(horizontal = 12.dp, vertical = 12.dp),
+            singleLine = true,
+            textStyle = androidx.compose.ui.text.TextStyle(color = tone.content, fontSize = 15.sp),
+            cursorBrush = androidx.compose.ui.graphics.SolidColor(accent),
+            visualTransformation = if (secret && !visible) androidx.compose.ui.text.input.PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                keyboardType = type,
+                imeAction = if (last) androidx.compose.ui.text.input.ImeAction.Done else androidx.compose.ui.text.input.ImeAction.Next,
+            ),
+            keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                onNext = { focus.moveFocus(androidx.compose.ui.focus.FocusDirection.Down) },
+                onDone = { focus.clearFocus(); onDone() },
+            ),
+            decorationBox = { inner ->
+                if (value.isEmpty()) Text(hint, color = Palette.Gray, fontSize = 15.sp)
+                inner()
+            },
+        )
+        if (secret) com.liquid.browser.ui.SymButton(
+            if (visible) "visibility_off" else "visibility", Palette.Gray, size = 20.dp,
+            label = if (visible) t("隱藏密碼") else t("顯示密碼"),
+        ) { visible = !visible }
+    }
 }
