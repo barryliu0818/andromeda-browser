@@ -379,33 +379,6 @@ fun SettingsContent(vm: BrowserViewModel, tone: Tone) {
         }
         item { GroupFooter(t("無痕分頁一律阻擋已知追蹤器、封鎖第三方 Cookie、移除網址追蹤參數。個別網站可在「網站設定」關閉廣告阻擋；網站設定也會顯示安全性檢查結果")) }
 
-        // 從 Google 匯入：Google 不開放其他瀏覽器使用 Chrome 同步，改用匯出檔（Google 匯出資料 zip、Bookmarks.html、BrowserHistory.json、密碼 CSV）
-        item { GroupHeader(t("從 Google 匯入"), tone) }
-        item(key = "google-import") {
-            val context = androidx.compose.ui.platform.LocalContext.current
-            val scope = rememberCoroutineScope()
-            var busy by remember { mutableStateOf(false) }
-            val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-                if (uri == null) return@rememberLauncherForActivityResult
-                busy = true
-                scope.launch {
-                    val r = runCatching { com.liquid.browser.browser.GoogleImport.import(context, uri) }
-                    busy = false
-                    r.onSuccess {
-                        vm.showToast(if (it.files == 0) t("看不懂這個檔案：請選 Google 匯出資料的 zip、Bookmarks.html、BrowserHistory.json 或密碼 CSV")
-                        else t("已匯入書籤 %1\$s 個、瀏覽記錄 %2\$s 筆、密碼 %3\$s 組", it.bookmarks, it.history, it.passwords))
-                    }.onFailure { vm.showToast(t("匯入失敗：%1\$s", it.message)) }
-                }
-            }
-            GroupRow(
-                0, 1, tone, t("匯入書籤、瀏覽記錄與密碼"),
-                subtitle = if (busy) t("匯入中…") else t("選 Google 匯出資料的 zip，或單一匯出檔"),
-                leading = { IconTile("download", Color(0xFF4285F4)) },
-                onClick = { if (!busy) pick.launch(arrayOf("application/zip", "text/html", "application/json", "text/csv", "text/comma-separated-values", "text/plain", "application/octet-stream")) },
-            )
-            GroupFooter(t("Google 不開放其他瀏覽器同步 Chrome 資料，請先匯出：書籤與瀏覽記錄在 takeout.google.com 只勾選 Chrome；密碼在 passwords.google.com →設定→匯出。重複匯入不會重複，匯出檔用完請刪除（密碼檔是明文）"))
-        }
-
         // 密碼：要先過指紋／螢幕鎖驗證才展開清單；點一列顯示／隱藏密碼，右側刪除
         item { GroupHeader(t("密碼"), tone) }
         item(key = "passwords") {

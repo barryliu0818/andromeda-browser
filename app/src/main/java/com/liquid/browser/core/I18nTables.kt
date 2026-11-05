@@ -3,15 +3,6 @@ package com.liquid.browser.core
 // 介面翻譯表（由翻譯清單產生）：鍵為繁體中文原文，值為該語言的翻譯
 
 internal val ZH_CN: Map<String, String> = hashMapOf(
-    "從 Google 匯入" to "从 Google 导入",
-    "Google 書籤" to "Google 书签",
-    "看不懂這個檔案：請選 Google 匯出資料的 zip、Bookmarks.html、BrowserHistory.json 或密碼 CSV" to "无法识别这个文件：请选择 Google 导出数据的 zip、Bookmarks.html、BrowserHistory.json 或密码 CSV",
-    "已匯入書籤 %1\$s 個、瀏覽記錄 %2\$s 筆、密碼 %3\$s 組" to "已导入书签 %1\$s 个、浏览记录 %2\$s 条、密码 %3\$s 组",
-    "匯入失敗：%1\$s" to "导入失败：%1\$s",
-    "匯入書籤、瀏覽記錄與密碼" to "导入书签、浏览记录和密码",
-    "匯入中…" to "导入中…",
-    "選 Google 匯出資料的 zip，或單一匯出檔" to "选择 Google 导出数据的 zip，或单个导出文件",
-    "Google 不開放其他瀏覽器同步 Chrome 資料，請先匯出：書籤與瀏覽記錄在 takeout.google.com 只勾選 Chrome；密碼在 passwords.google.com →設定→匯出。重複匯入不會重複，匯出檔用完請刪除（密碼檔是明文）" to "Google 不允许其他浏览器同步 Chrome 数据，请先导出：书签和浏览记录在 takeout.google.com 只勾选 Chrome；密码在 passwords.google.com →设置→导出。重复导入不会重复，导出文件用完请删除（密码文件是明文）",
     "前往" to "前往",
     "設為預設瀏覽器" to "设为默认浏览器",
     "已是預設瀏覽器" to "已是默认浏览器",
@@ -438,15 +429,6 @@ internal val ZH_CN: Map<String, String> = hashMapOf(
 )
 
 internal val EN: Map<String, String> = hashMapOf(
-    "從 Google 匯入" to "Import from Google",
-    "Google 書籤" to "Google Bookmarks",
-    "看不懂這個檔案：請選 Google 匯出資料的 zip、Bookmarks.html、BrowserHistory.json 或密碼 CSV" to "Unrecognized file: choose a Google Takeout zip, Bookmarks.html, BrowserHistory.json or a password CSV",
-    "已匯入書籤 %1\$s 個、瀏覽記錄 %2\$s 筆、密碼 %3\$s 組" to "Imported %1\$s bookmarks, %2\$s history entries, %3\$s passwords",
-    "匯入失敗：%1\$s" to "Import failed: %1\$s",
-    "匯入書籤、瀏覽記錄與密碼" to "Import bookmarks, history & passwords",
-    "匯入中…" to "Importing…",
-    "選 Google 匯出資料的 zip，或單一匯出檔" to "Choose a Google Takeout zip or a single export file",
-    "Google 不開放其他瀏覽器同步 Chrome 資料，請先匯出：書籤與瀏覽記錄在 takeout.google.com 只勾選 Chrome；密碼在 passwords.google.com →設定→匯出。重複匯入不會重複，匯出檔用完請刪除（密碼檔是明文）" to "Google doesn't let other browsers sync Chrome data, so export it first: bookmarks and history at takeout.google.com (select only Chrome); passwords at passwords.google.com → Settings → Export. Importing again won't create duplicates. Delete the export files afterwards (the password file is plain text)",
     "前往" to "Go",
     "設為預設瀏覽器" to "Set as default browser",
     "已是預設瀏覽器" to "Default browser",
@@ -875,15 +857,6 @@ internal val EN: Map<String, String> = hashMapOf(
 )
 
 internal val JA: Map<String, String> = hashMapOf(
-    "從 Google 匯入" to "Google からインポート",
-    "Google 書籤" to "Google ブックマーク",
-    "看不懂這個檔案：請選 Google 匯出資料的 zip、Bookmarks.html、BrowserHistory.json 或密碼 CSV" to "読み込めないファイルです：Google データエクスポートの zip、Bookmarks.html、BrowserHistory.json、またはパスワード CSV を選んでください",
-    "已匯入書籤 %1\$s 個、瀏覽記錄 %2\$s 筆、密碼 %3\$s 組" to "ブックマーク %1\$s 件、履歴 %2\$s 件、パスワード %3\$s 件をインポートしました",
-    "匯入失敗：%1\$s" to "インポートに失敗しました：%1\$s",
-    "匯入書籤、瀏覽記錄與密碼" to "ブックマーク・履歴・パスワードをインポート",
-    "匯入中…" to "インポート中…",
-    "選 Google 匯出資料的 zip，或單一匯出檔" to "Google データエクスポートの zip、または単一のエクスポートファイルを選択",
-    "Google 不開放其他瀏覽器同步 Chrome 資料，請先匯出：書籤與瀏覽記錄在 takeout.google.com 只勾選 Chrome；密碼在 passwords.google.com →設定→匯出。重複匯入不會重複，匯出檔用完請刪除（密碼檔是明文）" to "Google は他のブラウザに Chrome データの同期を許可していないため、先にエクスポートしてください：ブックマークと履歴は takeout.google.com（Chrome のみ選択）、パスワードは passwords.google.com →設定→エクスポート。再インポートしても重複しません。使用後はエクスポートファイルを削除してください（パスワードファイルは平文です）",
     "前往" to "移動",
     "設為預設瀏覽器" to "デフォルトのブラウザに設定",
     "已是預設瀏覽器" to "デフォルトのブラウザです",

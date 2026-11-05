@@ -94,12 +94,6 @@ interface BookmarkDao {
     @Query("DELETE FROM bookmarks WHERE url = :url AND isFolder = 0")
     suspend fun deleteUrl(url: String)
 
-    @Query("SELECT id FROM bookmarks WHERE isFolder = 1 AND (parentId IS :parentId) AND title = :title LIMIT 1")
-    suspend fun findFolder(parentId: Long?, title: String): Long?
-
-    @Query("SELECT url FROM bookmarks WHERE isFolder = 0 AND url IS NOT NULL")
-    suspend fun allUrls(): List<String>
-
     /** 刪除項目；若為資料夾，連同底下一層一起刪（巢狀更深的由遞迴呼叫處理）。 */
     @Query("DELETE FROM bookmarks WHERE id = :id OR parentId = :id")
     suspend fun delete(id: Long)
@@ -121,13 +115,6 @@ interface HistoryDao {
             "GROUP BY host ORDER BY visits DESC LIMIT :limit"
     )
     fun frequent(since: Long, limit: Int = 8): Flow<List<FrequentSite>>
-
-    @Insert
-    suspend fun insertAll(e: List<HistoryEntry>)
-
-    /** 匯入去重用：某段時間內已有的「網址＋時間」 */
-    @Query("SELECT url || ' ' || visitedAt FROM history WHERE visitedAt BETWEEN :from AND :to")
-    suspend fun keysBetween(from: Long, to: Long): List<String>
 
     @Query("DELETE FROM history WHERE id = :id")
     suspend fun delete(id: Long)
