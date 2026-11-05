@@ -33,6 +33,13 @@ class AdaptiveRefresh(private val activity: Activity) {
 
     /** 有操作或畫面在動：切到高刷新率，並重新計時 */
     fun poke() {
+        touchedAt = android.os.SystemClock.uptimeMillis()
+        keep()
+    }
+
+    private var touchedAt = 0L
+
+    private fun keep() {
         if (!active) apply(true)
         handler.removeCallbacks(idle)
         handler.postDelayed(idle, IdleMs)
@@ -63,7 +70,10 @@ class AdaptiveRefresh(private val activity: Activity) {
     private var pausedCheck: () -> Boolean = { false }
     @Volatile private var lastFrameAt = 0L
     @Volatile private var ignoreFramesUntil = 0L
-    private val pokeOnMain = Runnable { if (!pausedCheck()) poke() }
+    // 只算操作後 [FrameWindowMs] 內的畫面（慣性捲動、面板動畫、淡出）：網頁無限循環的小動畫不會讓靜止頁面一直跑 120Hz
+    private val pokeOnMain = Runnable {
+        if (!pausedCheck() && android.os.SystemClock.uptimeMillis() - touchedAt < FrameWindowMs) keep()
+    }
     private val frameListener = Window.OnFrameMetricsAvailableListener { _, _, _ ->
         // 每 100ms 最多通知主執行緒一次
         val now = android.os.SystemClock.uptimeMillis()
@@ -82,6 +92,7 @@ class AdaptiveRefresh(private val activity: Activity) {
 
     companion object {
         const val IdleMs = 1500L
+        const val FrameWindowMs = 6000L
     }
 }
 
