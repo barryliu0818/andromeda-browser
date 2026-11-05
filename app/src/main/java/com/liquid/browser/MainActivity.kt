@@ -67,6 +67,9 @@ class MainActivity : ComponentActivity() {
 
     @OptIn(ExperimentalHazeApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
+        // HttpURLConnection 的連線池預設只留 5 條閒置連線：下載開 16 條連線抓 HLS 小片段時大多要重新握手（TLS），
+        // 小畫質影片只有 2 MB/s。調大後連線重複使用。要在第一次連網前設定（連線池在第一次使用時建立）
+        System.setProperty("http.maxConnections", "32")
         BugLog.init(this)
         BugLog.startWatchdog()
         created = android.os.SystemClock.uptimeMillis()

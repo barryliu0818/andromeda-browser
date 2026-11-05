@@ -717,7 +717,9 @@ fun BrowserScreen(vm: BrowserViewModel) {
                 }
                 // 網址列上方的浮動膠囊：翻譯進度（翻完就收起，已翻譯的狀態改由網址列翻譯鈕的顏色表示）＋ IDM 式「下載影片」
                 val showTr = tab.translated && tab.trDone < tab.trSent && !focused && !finding
-                val showDl = tab.media.isNotEmpty() && !focused && !finding && settings.videoDownloadButton && vm.customView == null
+                val showDl = tab.media.isNotEmpty() && !focused && !finding && settings.videoDownloadButton && vm.customView == null &&
+                    // 面板、選單開著時藏起來：以前會浮在下載面板與畫質選單上面，蓋住最後一個選項
+                    sheet.content == null && menu.spec == null
                 AnimatedVisibility(showTr || showDl, enter = expandVertically(Motion.glass()) + fadeIn(), exit = shrinkVertically(Motion.glass()) + fadeOut()) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
                         AnimatedVisibility(
