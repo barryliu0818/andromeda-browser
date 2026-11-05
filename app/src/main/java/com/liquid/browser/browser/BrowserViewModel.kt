@@ -48,6 +48,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withPermit
 
@@ -869,6 +871,34 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         if (on) showToast(t("字幕翻譯已開啟"))
     }
 
+    private val trPending = mutableListOf<Pair<List<String>, kotlinx.coroutines.CompletableDeferred<Map<String, String>>>>()
+
+    /**
+     * AI 翻譯合併送出：網頁一次丟來好幾批（每批最多 30 段），等 80ms 收齊後合併成幾個請求（每個最多 2000 字，最多 4 個同時跑），
+     * 重複的文字只送一次。系統提示詞不用每 30 段重送一遍，請求數也少很多。只在主執行緒呼叫
+     */
+    private suspend fun mergedTranslate(todo: List<String>, send: suspend (List<String>, ((Int, String) -> Unit)?) -> List<String>): Map<String, String> {
+        val done = kotlinx.coroutines.CompletableDeferred<Map<String, String>>()
+        trPending += todo to done
+        if (trPending.size == 1) viewModelScope.launch {
+            delay(80)
+            val jobs = trPending.toList().also { trPending.clear() }
+            val all = jobs.flatMap { it.first }.distinct()
+            val parts = mutableListOf(mutableListOf<String>())
+            var chars = 0
+            all.forEach { s -> if (chars + s.length > 2000 && parts.last().isNotEmpty()) { parts += mutableListOf<String>(); chars = 0 }; parts.last() += s; chars += s.length }
+            // 串流回來的譯文：某一批的段落全部到齊就先交回網頁（畫面內那批最先），不等其他批
+            val got = java.util.concurrent.ConcurrentHashMap<String, String>()
+            fun release() = jobs.forEach { (texts, d) -> if (!d.isCompleted && texts.all { got.containsKey(it) }) d.complete(HashMap(got)) }
+            runCatching {
+                kotlinx.coroutines.coroutineScope {
+                    parts.map { p -> async { p.zip(send(p) { i, v -> got[p[i]] = v; synchronized(got) { release() } }) } }.awaitAll()
+                }.flatten().toMap()
+            }.onSuccess { m -> jobs.forEach { it.second.complete(m) } }.onFailure { e -> jobs.forEach { it.second.completeExceptionally(e) } }
+        }
+        return done.await()
+    }
+
     /** 翻譯一批文字：先查快取，AI 引擎失敗時這個分頁改用免費引擎（只提示一次） */
     private suspend fun translateTexts(tab: Tab, texts: List<String>): Result<List<String>> {
             val s = settings.value
@@ -878,17 +908,20 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
                 // 先查快取；只把沒翻過、且不重複的文字送出去
                 val cached = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { translationCache.get(target.google, texts) }
                 val todo = texts.filter { it !in cached }.distinct()
-                val fresh = if (todo.isEmpty()) emptyMap() else {
-                    val tr = (if (engine.isFree) freeGate else translateGate).withPermit {
-                        runCatching { Translator.translate(todo, engine, s.translateKeys[engine.keyOwner].orEmpty(), s.translateModels[engine].orEmpty(), target) }
+                val send: suspend (List<String>, ((Int, String) -> Unit)?) -> List<String> = { part, onLine ->
+                    (if (engine.isFree) freeGate else translateGate).withPermit {
+                        runCatching { Translator.translate(part, engine, s.translateKeys[engine.keyOwner].orEmpty(), s.translateModels[engine].orEmpty(), target, onLine) }
                             .recoverCatching { e ->
                                 if (engine == TranslateEngine.Tencent) throw e
                                 com.liquid.browser.BugLog.event("translate", "$engine 失敗，改用免費翻譯：${e.message}")
                                 if (aiFailedFor != tab) { aiFailedFor = tab; showToast(t("%1\$s，改用免費翻譯", e.message)) }
-                                Translator.translate(todo, TranslateEngine.Tencent, "", "", target)
+                                Translator.translate(part, TranslateEngine.Tencent, "", "", target)
                             }.getOrThrow()
                     }
-                    todo.zip(tr).toMap().also { m ->
+                }
+                val fresh = if (todo.isEmpty()) emptyMap() else {
+                    val all = if (engine.isFree) todo.zip(send(todo, null)).toMap() else mergedTranslate(todo, send)
+                    todo.associateWith { all[it] ?: it }.also { m ->
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { translationCache.put(target.google, m) }
                     }
                 }

@@ -50,12 +50,33 @@ enum class TargetLang(val label: String, val google: String, val tencent: String
 }
 
 object Translator {
+    // 逐行「編號|文字」比 JSON 物件省 token（不用鍵的引號、逗號與跳脫字元，送出與回傳都省）
     private fun prompt(target: TargetLang) =
-        "你是專業的網頁翻譯。使用者會給一個 JSON 物件，鍵是編號、值是網頁上的一段文字。" +
-            "每一個值都必須翻譯成${target.prompt}，包括常見的詞句，回傳鍵完全相同的 JSON 物件，不要任何說明或 Markdown。" +
-            "網址、程式碼、數字、單位與專有名稱維持原樣；已經是${target.prompt}的值原樣回傳。"
+        "你是專業的網頁翻譯。每行是「編號|網頁文字」，把每行文字翻譯成${target.prompt}（常見詞句也要翻），" +
+            "逐行輸出「編號|譯文」，編號與行數不變，不要其他文字。" +
+            "很多行是同一句話被連結切開的片段：每行只翻譯自己的內容，不可把字詞移到別行或合併行，片段譯文可以不成句。網址、程式碼、數字、單位與專有名稱維持原樣；已經是${target.prompt}的原樣輸出。"
 
-    suspend fun translate(texts: List<String>, engine: TranslateEngine, key: String, model: String, target: TargetLang): List<String> =
+    /** 送給模型的內容：一段一行，段內換行改成空白（網頁文字的換行本來就顯示成空白） */
+    fun encodeLines(texts: List<String>): String =
+        texts.withIndex().joinToString("\n") { (i, s) -> "$i|" + s.replace(Regex("\\s+"), " ").trim() }
+
+    /** 解析模型回的「編號|譯文」；沒對到的編號為 null（之後由免費引擎補翻） */
+    fun parseLines(content: String, size: Int): List<String?> {
+        val out = arrayOfNulls<String>(size)
+        content.lineSequence().forEach { l -> parseLine(l, size)?.let { (i, v) -> out[i] = v } }
+        return out.toList()
+    }
+
+    private val lineRe = Regex("""^\s*(\d+)\s*[|｜]\s?(.*)$""")
+
+    private fun parseLine(l: String, size: Int): Pair<Int, String>? {
+        val m = lineRe.find(l) ?: return null
+        val i = m.groupValues[1].toIntOrNull()?.takeIf { it in 0 until size } ?: return null
+        return m.groupValues[2].trim().takeIf { it.isNotEmpty() }?.let { i to it }
+    }
+
+    /** onLine：AI 引擎串流時每翻好一段就回報（第幾段, 譯文），可在 IO 執行緒呼叫 */
+    suspend fun translate(texts: List<String>, engine: TranslateEngine, key: String, model: String, target: TargetLang, onLine: ((Int, String) -> Unit)? = null): List<String> =
         withContext(Dispatchers.IO) {
             when {
                 engine == TranslateEngine.Tencent -> tencent(texts, target)
@@ -63,7 +84,7 @@ object Translator {
                 engine == TranslateEngine.Free -> runCatching { google(texts, target) }.getOrElse { tencent(texts, target) }
                 // AI 引擎沒填金鑰：用騰訊免費翻譯
                 key.isBlank() -> tencent(texts, target)
-                else -> llm(texts, engine, key, model.ifBlank { engine.model }, target)
+                else -> llm(texts, engine, key, model.ifBlank { engine.model }, target, onLine)
             }
         }
 
@@ -139,28 +160,29 @@ object Translator {
     }
 
     /** OpenAI 相容的 Chat Completions（DeepSeek、千問、GLM） */
-    private fun llm(texts: List<String>, engine: TranslateEngine, key: String, model: String, target: TargetLang): List<String> =
+    private fun llm(texts: List<String>, engine: TranslateEngine, key: String, model: String, target: TargetLang, onLine: ((Int, String) -> Unit)? = null): List<String> =
         try {
             // 百煉上的 GLM 不接受 enable_thinking=false（HTTP 400、沒有錯誤訊息）：GLM 不送這個參數
-            llmOnce(texts, engine, key, model, target, thinkingOff = engine != TranslateEngine.Glm)
+            llmOnce(texts, engine, key, model, target, thinkingOff = engine != TranslateEngine.Glm, onLine)
         } catch (e: IOException) {
             // 其他模型若也不接受關閉思考（400 或訊息提到 enable_thinking）：拿掉這個參數再試一次
             if (engine != TranslateEngine.Glm && (e.message?.contains("enable_thinking") == true || e.message?.contains("HTTP 400") == true))
-                llmOnce(texts, engine, key, model, target, thinkingOff = false) else throw e
+                llmOnce(texts, engine, key, model, target, thinkingOff = false, onLine) else throw e
         }
 
-    private fun llmOnce(texts: List<String>, engine: TranslateEngine, key: String, model: String, target: TargetLang, thinkingOff: Boolean): List<String> {
+    private fun llmOnce(texts: List<String>, engine: TranslateEngine, key: String, model: String, target: TargetLang, thinkingOff: Boolean, onLine: ((Int, String) -> Unit)?): List<String> {
         val payload = JSONObject()
             .put("model", model)
             .put("temperature", 0.2)
-            .put("stream", false)
+            // 串流：模型每寫完一行就先貼回網頁，不用等整批寫完（畫面內的段落排在最前面，最先出現）
+            .put("stream", true)
             // 百煉上的模型預設會先思考：翻譯關掉思考（實測 qwen3.8-flash 4.4→0.7 秒）
             .apply { if (thinkingOff) put("enable_thinking", false) }
             .put(
                 "messages",
                 JSONArray()
                     .put(JSONObject().put("role", "system").put("content", prompt(target)))
-                    .put(JSONObject().put("role", "user").put("content", JSONObject().apply { texts.forEachIndexed { i, t -> put("$i", t) } }.toString())),
+                    .put(JSONObject().put("role", "user").put("content", encodeLines(texts))),
             )
         val conn = (URL(engine.endpoint).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
@@ -179,11 +201,27 @@ object Translator {
                 val hint = if (msg?.contains("Access denied", true) == true) t("（請先在阿里雲百煉控制台開通 %1\$s）", model) else ""
                 throw IOException("${engine.label} HTTP $code${msg?.let { "：$it" }.orEmpty()}$hint")
             }
-            val content = JSONObject(conn.inputStream.bufferedReader().readText())
-                .getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
-            // 以編號對回原文，不會錯位；模型偶爾會包 ```json：取第一個 { 到最後一個 }
-            val obj = runCatching { JSONObject(content.substring(content.indexOf('{'), content.lastIndexOf('}') + 1)) }.getOrNull() ?: JSONObject()
-            val out = MutableList<String?>(texts.size) { i -> obj.optString("$i").takeIf { it.isNotEmpty() } }
+            val content = StringBuilder()
+            var lineStart = 0
+            conn.inputStream.bufferedReader().useLines { sse ->
+                for (ev in sse) {
+                    if (!ev.startsWith("data:")) continue
+                    val data = ev.substring(5).trim()
+                    if (data == "[DONE]") break
+                    val delta = runCatching { JSONObject(data).getJSONArray("choices").getJSONObject(0).optJSONObject("delta")?.optString("content") }.getOrNull()
+                    if (delta.isNullOrEmpty() || delta == "null") continue
+                    content.append(delta)
+                    // 寫完的行立刻回報
+                    while (true) {
+                        val nl = content.indexOf("\n", lineStart)
+                        if (nl < 0) break
+                        if (onLine != null) parseLine(content.substring(lineStart, nl), texts.size)?.let { (i, v) -> onLine(i, v) }
+                        lineStart = nl + 1
+                    }
+                }
+            }
+            // 以編號對回原文，不會錯位
+            val out = parseLines(content.toString(), texts.size).toMutableList()
             // 模型漏掉的段落改用免費引擎補翻
             val missing = out.indices.filter { out[it] == null }
             if (missing.isNotEmpty()) {
