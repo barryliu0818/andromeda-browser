@@ -168,7 +168,8 @@ object GoogleImport {
         }
         db.withTransaction {
             // Chrome 匯出的最上層通常只有「書籤列」「其他書籤」等資料夾：全部收進「Google 書籤」
-            val root = dao.findFolder(null, "Google 書籤") ?: dao.insert(Bookmark(title = "Google 書籤", isFolder = true, position = dao.nextPosition(null)))
+            val name = com.liquid.browser.core.t("Google 書籤")
+            val root = dao.findFolder(null, name) ?: dao.insert(Bookmark(title = name, isFolder = true, position = dao.nextPosition(null)))
             put(root, nodes)
         }
         return added
