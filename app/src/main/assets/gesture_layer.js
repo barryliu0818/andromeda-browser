@@ -299,22 +299,7 @@
     window.addEventListener('scroll', place, { passive: true });
     window.addEventListener('resize', place);
     document.addEventListener('fullscreenchange', function () { setTimeout(place, 50); });
-    // 全螢幕元素是整個播放器（含網站自己的控制列）時，網站的控制列會和 App 的控制層疊在一起：
-    // 全螢幕期間把通往影片那條路以外的兄弟元素都藏起來（App 的字幕層等標了 data-lq-keep 的留著），離開時還原
-    var chrome = [];
-    document.addEventListener('fullscreenchange', function () {
-      chrome.forEach(function (p) { p[0].style.visibility = p[1]; });
-      chrome = [];
-      var fs = document.fullscreenElement;
-      if (!fs || fs === video || !fs.contains(video)) return;
-      for (var n = video; n && n !== fs; n = n.parentElement) {
-        Array.prototype.forEach.call(n.parentElement.children, function (s) {
-          if (s === n || s === layer || s.hasAttribute('data-lq-keep') || /^(STYLE|SCRIPT|LINK)$/.test(s.tagName)) return;
-          chrome.push([s, s.style.visibility]);
-          s.style.setProperty('visibility', 'hidden', 'important');
-        });
-      }
-    });
+    // 全螢幕時隱藏網站自己的控制列由 video_detect.js 的 hideSiteControls 統一處理（兩邊都做時，這邊會把對方藏起來的狀態當原狀記下，離開後控制列一直不見）
     setInterval(place, 1000); // 版面被頁面腳本改動時的保險
 
     var pendingTap = null, lastTapAt = 0, lastZone = 0, accumulating = false, accumulated = 0, rippleTimer = null;

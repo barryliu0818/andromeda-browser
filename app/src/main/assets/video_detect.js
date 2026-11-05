@@ -73,7 +73,7 @@
       var par = el.parentElement;
       if (!par) break;
       Array.prototype.forEach.call(par.children, function (c) {
-        if (c === el || (c.classList && c.classList.contains('lq-layer'))) return;
+        if (c === el || (c.classList && c.classList.contains('lq-layer')) || (c.hasAttribute && c.hasAttribute('data-lq-keep')) || /^(STYLE|SCRIPT|LINK)$/.test(c.tagName)) return;
         hidden.push([c, c.style.visibility]);
         c.style.setProperty('visibility', 'hidden', 'important');
       });
