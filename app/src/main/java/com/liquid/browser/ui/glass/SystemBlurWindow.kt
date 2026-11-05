@@ -61,6 +61,8 @@ fun SystemBlurWindow(
     modifier: Modifier = Modifier,
     /** true＝暫時畫在主畫面（輸入中、面板開著…）：視窗保留但隱藏，切回來立即顯示，不必重建（重建要等 0.4 秒、中間會換色） */
     inline: Boolean = false,
+    /** true＝整個藏起來（網頁影片全螢幕蓋住了）：視窗隱藏、也不搬到主畫面重畫（搬一次整條網址列重新組合，進出全螢幕會卡一下） */
+    gone: Boolean = false,
     /** toMain：把視窗內元件的座標（boundsInRoot）換成主畫面座標，讓選單等錨點對得上 */
     content: @Composable (toMain: (Rect) -> Rect) -> Unit,
 ) {
@@ -77,10 +79,11 @@ fun SystemBlurWindow(
         if (ready && !inline) { androidx.compose.runtime.withFrameNanos {}; androidx.compose.runtime.withFrameNanos {}; winShown = true } else winShown = false
     }
     Box(modifier.fillMaxWidth().height(height).onLayoutRectChanged(0, 0) { b -> place.origin = Offset(b.positionInWindow.x.toFloat(), b.positionInWindow.y.toFloat()); place.size = IntSize(b.width, b.height); place.push() }) {
-        if (!ready || inline || !winShown) content { it }
+        if (!gone && (!ready || inline || !winShown)) content { it }
     }
     if (!ready) return
     val latestInline by rememberUpdatedState(inline)
+    val latestGone by rememberUpdatedState(gone)
 
     val context = LocalContext.current
     val parent = rememberCompositionContext()
@@ -100,12 +103,12 @@ fun SystemBlurWindow(
             win.view.setContent { win.Content { toMain -> latest(toMain) } }
             win.show()
         }
-        place.push = { if (place.size != IntSize.Zero) { val rs = latestRegions(); wins.forEachIndexed { i, w -> w.update(place.origin, rs.getOrNull(i) ?: Rect.Zero, place.size, blurPx, hidden = latestInline) } } }
+        place.push = { if (place.size != IntSize.Zero) { val rs = latestRegions(); wins.forEachIndexed { i, w -> w.update(place.origin, rs.getOrNull(i) ?: Rect.Zero, place.size, blurPx, hidden = latestInline || latestGone) } } }
         place.push()
         onDispose { place.push = {}; wins.forEach { it.park(); it.dismiss() } }
     }
     // 玻璃範圍（含左右滑切換分頁的位移）改變時更新視窗：在協程裡觀察，不觸發重組
-    androidx.compose.runtime.LaunchedEffect(wins) { androidx.compose.runtime.snapshotFlow { latestRegions() to latestInline }.collect { place.push() } }
+    androidx.compose.runtime.LaunchedEffect(wins) { androidx.compose.runtime.snapshotFlow { Triple(latestRegions(), latestInline, latestGone) }.collect { place.push() } }
 }
 
 /** 佔位的位置與大小（排版回呼寫入，不是 Compose 狀態），push 把目前資料套到視窗 */

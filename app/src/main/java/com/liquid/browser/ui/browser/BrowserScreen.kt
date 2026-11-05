@@ -825,7 +825,7 @@ fun BrowserScreen(vm: BrowserViewModel) {
                 if (classic) { if (finding) FindBar(tab, haze, menuTone) { finding = false } }
                 else if (!PlatformBackdrop && crossBlur) {
                     var glass by remember { mutableStateOf(emptyList<Rect>()) }
-                    SystemBlurWindow(Dimens.Control, regions = { glass.map { it.translate(swipe.value, 0f) } }, inline = !sysBlur || overview || sheet.content != null || menu.spec != null || vm.customView != null || vm.player != null) { toMain ->
+                    SystemBlurWindow(Dimens.Control, regions = { glass.map { it.translate(swipe.value, 0f) } }, inline = !sysBlur || overview || sheet.content != null || menu.spec != null || vm.player != null, gone = vm.customView != null) { toMain ->
                         // 只有視窗裡那份回報玻璃範圍：主畫面那份（輸入中）收起前最後一幀是動畫中途的尺寸，會蓋掉正確值
                         val inWindow = com.liquid.browser.ui.glass.LocalInBlurWindow.current
                         controlsRow(toMain) { if (inWindow) glass = it }
