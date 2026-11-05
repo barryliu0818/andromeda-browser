@@ -898,7 +898,9 @@ fun BrowserScreen(vm: BrowserViewModel) {
             // 密碼列：貼在鍵盤正上方
             PasswordBar(vm, haze, menuTone, menu, Modifier.align(Alignment.BottomCenter).imePadding().padding(start = 16.dp, end = 16.dp, bottom = 8.dp))
 
-            // 玻璃提示訊息
+            // 玻璃提示訊息：淡出時沿用最後一則文字（toast 一變成 null 文字就清空，膠囊會在淡出途中突然縮成空的，看起來像結尾卡一下）
+            val lastToast = remember { arrayOf("") }
+            vm.toast?.let { lastToast[0] = it }
             AnimatedVisibility(
                 vm.toast != null,
                 Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = if (vm.appPrompt?.tab == vm.current) above + 60.dp else above),
@@ -906,7 +908,7 @@ fun BrowserScreen(vm: BrowserViewModel) {
                 exit = fadeOut(),
             ) {
                 LiquidGlass(haze, menuTone, CircleShape) {
-                    Text(vm.toast.orEmpty(), Modifier.padding(horizontal = 18.dp, vertical = 10.dp), color = menuTone.content, fontSize = 14.sp)
+                    Text(vm.toast ?: lastToast[0], Modifier.padding(horizontal = 18.dp, vertical = 10.dp), color = menuTone.content, fontSize = 14.sp)
                 }
             }
 
