@@ -222,8 +222,10 @@ fun BrowserScreen(vm: BrowserViewModel) {
     val statusTint = if (tab.isBlank) bg else pageTop ?: tab.themeColor
     // 狀態列底色：顏色變化時平滑過渡（捲到不同顏色的區塊時不會跳色）
     val statusFill by animateColorAsState(statusTint ?: bg, Motion.timed(Motion.ShortMs), label = "status")
-    SideEffect {
-        val light = if (overview) !(dark || vm.incognitoMode) else statusTint?.let { it.luminance() > 0.5f } ?: !dark
+    // 只在深淺真的改變時才設定：每次設定都會讓主視窗重新向系統排版（relayoutWindow，一次 20～40ms），
+    // 以前寫在 SideEffect 裡每次重組都設，進全螢幕時系統列隱藏動畫每幀都重組，每幀都卡
+    val light = if (overview) !(dark || vm.incognitoMode) else statusTint?.let { it.luminance() > 0.5f } ?: !dark
+    LaunchedEffect(light) {
         activity?.window?.let { WindowCompat.getInsetsController(it, view).isAppearanceLightStatusBars = light }
     }
 
