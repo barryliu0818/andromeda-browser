@@ -81,6 +81,21 @@ object PasswordVault {
         return true
     }
 
+    /** 一次存多筆（匯入用，只加密寫檔一次）；回傳新增或更新的筆數 */
+    @Synchronized
+    fun saveAll(items: List<Credential>): Int {
+        val list = load()
+        var n = 0
+        items.forEach { c ->
+            val old = list.indexOfFirst { it.origin == c.origin && it.user == c.user }
+            if (old >= 0 && list[old].pass == c.pass) return@forEach
+            if (old >= 0) list[old] = c else list.add(c)
+            n++
+        }
+        if (n > 0) persist(list)
+        return n
+    }
+
     @Synchronized
     fun delete(c: Credential) {
         val list = load()
