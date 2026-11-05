@@ -196,6 +196,7 @@ object Translator {
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("Authorization", "Bearer $key")
         }
+        val t0 = System.nanoTime(); var tFirst = 0L
         try {
             conn.outputStream.use { it.write(payload.toString().toByteArray()) }
             val code = conn.responseCode
@@ -214,6 +215,7 @@ object Translator {
                     if (data == "[DONE]") break
                     val delta = runCatching { JSONObject(data).getJSONArray("choices").getJSONObject(0).optJSONObject("delta")?.optString("content") }.getOrNull()
                     if (delta.isNullOrEmpty() || delta == "null") continue
+                    if (tFirst == 0L) tFirst = System.nanoTime()
                     content.append(delta)
                     // 寫完的行立刻回報
                     while (true) {
@@ -225,6 +227,7 @@ object Translator {
                 }
             }
             // 以編號對回原文，不會錯位
+            android.util.Log.i("OreaTr", "llm ${texts.size}段 in=${texts.sumOf { it.length }} out=${content.length} first=${(tFirst - t0) / 1_000_000}ms total=${(System.nanoTime() - t0) / 1_000_000}ms")
             val out = parseLines(content.toString(), texts.size).toMutableList()
             // 模型漏掉的段落改用免費引擎補翻
             val missing = out.indices.filter { out[it] == null }

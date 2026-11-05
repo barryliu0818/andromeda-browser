@@ -275,6 +275,12 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         viewModelScope.launch {
             settings.map { it.identifyAsIPhone }.distinctUntilChanged().collect { on -> tabs.forEach { it.setIdentifyAsIPhone(on) } }
         }
+        // 「翻譯成」改了：正在翻譯的分頁丟掉舊語言的譯文、整頁用新語言重翻（不會半頁舊語言、半頁新語言）
+        viewModelScope.launch {
+            settings.map { it.translateTarget.name }.distinctUntilChanged().collect { tg ->
+                tabs.filter { it.translated && it.trTarget != null && it.trTarget != tg }.forEach { it.resetTranslate(); it.trTarget = tg; it.startTranslate(translateScript) }
+            }
+        }
         // 「封鎖第三方 Cookie」改變時套用到所有已開啟的分頁
         viewModelScope.launch {
             settings.map { it.blockThirdPartyCookies }.distinctUntilChanged().collect { block -> tabs.forEach { it.setThirdPartyCookies(!block) } }
@@ -644,7 +650,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     private val translateScript: String by lazy { getApplication<Application>().assets.open("translate.js").bufferedReader().use { it.readText() } }
 
     /** 同時送出的翻譯批次：AI 引擎 4 批、免費引擎 2 批（避免被限流） */
-    private val translateGate = kotlinx.coroutines.sync.Semaphore(4)
+    private val translateGate = kotlinx.coroutines.sync.Semaphore(8)
     private val freeGate = kotlinx.coroutines.sync.Semaphore(2)
     /** AI 引擎失敗（金鑰錯誤、額度用完）後這個頁面改用免費引擎，並只提示一次 */
     private var aiFailedFor: Tab? = null
@@ -874,7 +880,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     private val trPending = mutableListOf<Pair<List<String>, kotlinx.coroutines.CompletableDeferred<Map<String, String>>>>()
 
     /**
-     * AI 翻譯合併送出：網頁一次丟來好幾批（每批最多 30 段），等 80ms 收齊後合併成幾個請求（每個最多 2000 字，最多 4 個同時跑），
+     * AI 翻譯合併送出：網頁一次丟來好幾批（每批最多 30 段），等 80ms 收齊後合併後拆成小請求（第一個約 250 字、其餘約 500 字，最多 8 個同時跑），
      * 重複的文字只送一次。系統提示詞不用每 30 段重送一遍，請求數也少很多。只在主執行緒呼叫
      */
     private suspend fun mergedTranslate(todo: List<String>, send: suspend (List<String>, ((Int, String) -> Unit)?) -> List<String>): Map<String, String> {
@@ -886,7 +892,10 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
             val all = jobs.flatMap { it.first }.distinct()
             val parts = mutableListOf(mutableListOf<String>())
             var chars = 0
-            all.forEach { s -> if (chars + s.length > 2000 && parts.last().isNotEmpty()) { parts += mutableListOf<String>(); chars = 0 }; parts.last() += s; chars += s.length }
+            // 模型一個字一個字寫，一個請求越大寫越久（實測 1100 字要 8.6 秒）：拆成小請求同時跑。
+            // 第一個請求只放最前面（畫面內）約 250 字，最先回來；之後每個約 500 字
+            all.forEach { s -> if (chars + s.length > (if (parts.size == 1) 250 else 500) && parts.last().isNotEmpty()) { parts += mutableListOf<String>(); chars = 0 }; parts.last() += s; chars += s.length }
+            android.util.Log.i("OreaTr", "merge ${jobs.size}批 ${all.size}段 → ${parts.size}請求 ${parts.map { p -> p.sumOf { it.length } }}")
             // 串流回來的譯文：某一批的段落全部到齊就先交回網頁（畫面內那批最先），不等其他批
             val got = java.util.concurrent.ConcurrentHashMap<String, String>()
             fun release() = jobs.forEach { (texts, d) -> if (!d.isCompleted && texts.all { got.containsKey(it) }) d.complete(HashMap(got)) }
