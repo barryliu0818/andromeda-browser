@@ -271,8 +271,7 @@ class Tab(
         return when (target) {
             TargetLang.ZhTW -> l == "zh-tw" || l == "zh-hk" || l == "zh-mo" || l.startsWith("zh-hant")
             TargetLang.ZhCN -> l == "zh" || l == "zh-cn" || l == "zh-sg" || l.startsWith("zh-hans")
-            TargetLang.En -> l == "en" || l.startsWith("en-")
-            TargetLang.Ja -> l == "ja" || l.startsWith("ja-")
+            else -> l == target.google || l.startsWith(target.google + "-")
         }
     }
 

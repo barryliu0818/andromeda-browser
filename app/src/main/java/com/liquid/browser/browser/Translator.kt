@@ -47,6 +47,10 @@ enum class TargetLang(val label: String, val google: String, val tencent: String
     ZhCN("簡體中文", "zh-CN", "zh", "简体中文"),
     En("English", "en", "en", "English"),
     Ja("日本語", "ja", "ja", "日本語"),
+    Ko("한국어", "ko", "ko", "한국어"),
+    Es("Español", "es", "es", "español"),
+    Ru("Русский", "ru", "ru", "русский язык"),
+    Vi("Tiếng Việt", "vi", "vi", "tiếng Việt"),
 }
 
 object Translator {
