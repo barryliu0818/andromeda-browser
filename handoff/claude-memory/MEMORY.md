@@ -1,0 +1,4 @@
+- [Label station printers](label-station-printers.md) — POSTEK forms, L/L2/L3 printers, LABEL_LOG.TXT diagnosis
+- [Reply in Chinese](reply-in-chinese.md) — user wants all replies in Traditional Chinese
+- [Store on D: drive](store-on-d-drive.md) — everything Claude creates on the Windows PC goes under D:\
+- [Andromeda bug logs](andromeda-bug-logs.md) — auto anomaly logs on phone; pull with scripts/buglogs.ps1 before guessing
