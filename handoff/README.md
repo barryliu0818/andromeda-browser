@@ -4,7 +4,9 @@
 - `local.properties`（sdk.dir、SUPABASE_URL、SUPABASE_ANON_KEY、OREA_CORE_DIR）——用隨身碟或密碼管理器搬，sdk.dir 改成新電腦的路徑
 - `~/.ssh/orea_build`、`orea_build.pub`（編譯伺服器 `ssh -i ~/.ssh/orea_build -p 32117 bygpu@ai.bygpu.com`）
 - release 簽章檔（若有放在 repo 外）
-- `D:\orea-chromium\bin`、`core-assets`、`vendor`（約 230MB，Orea 核心；或在伺服器重編）
+- `~/.android/debug.keystore`：release 目前用它簽章，換了就不能覆蓋安裝手機上的 Orea（要先移除舊版）
+- Orea 核心（`D:\orea-chromium\bin`、`core-assets`、`vendor`、`seen`）已放在 GitHub Release `handoff-2026-11-06` 的 `orea-core-files.tar.gz`：
+  `gh release download handoff-2026-11-06 --repo barryliu0818/andromeda-browser`，再到 `D:\orea-chromium` 解壓 `tar -xzf orea-core-files.tar.gz`
 
 ## 還原
 - `claude-memory/*.md` → 新電腦的 `~/.claude/projects/<專案資料夾>/memory/`
