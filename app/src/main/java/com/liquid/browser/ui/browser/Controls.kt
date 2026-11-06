@@ -105,7 +105,6 @@ import com.liquid.browser.ui.Sym
 import com.liquid.browser.ui.SymButton
 import com.liquid.browser.ui.accent
 import com.liquid.browser.ui.glass.Tone
-import com.liquid.browser.ui.glass.LocalReduceTransparency
 import com.liquid.browser.ui.glass.liquidGlass
 import com.liquid.browser.ui.glass.liquidGlassGroup
 import com.liquid.browser.ui.glass.rememberGlassStyle
@@ -159,7 +158,7 @@ fun Controls(
     val iconAlpha = { (1 - p() * 2.5f).coerceIn(0f, 1f) }
     val circleStyle = rememberGlassStyle(CircleShape, tone.tint)
     val cancelI = remember { MutableInteractionSource() }
-    val noMerge = Build.VERSION.SDK_INT < 33 || LocalReduceTransparency.current
+    val noMerge = Build.VERSION.SDK_INT < 33
     // 完全隱藏的玻璃元件必須移出組合，否則仍會留在玻璃容器裡與膠囊融合出殘影；
     // derivedStateOf 讓重組只發生在跨越門檻的那一幀
     // 收合過半時圓鈕已大半藏在膠囊下，直接移除（毛玻璃底層無法隨 metaball 融合，留著會看到一顆亮圓）

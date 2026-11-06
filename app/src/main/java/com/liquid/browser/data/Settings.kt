@@ -30,7 +30,6 @@ data class Settings(
     val engine: SearchEngine = SearchEngine.Google,
     val desktopByDefault: Boolean = false,
     val nativePlayer: Boolean = false,
-    val reduceTransparency: Boolean = false,
     /** 起始頁自訂背景圖（content:// URI），null 為預設淺灰／近黑 */
     val startBackground: String? = null,
     /** 讓網站把本 App 識別為 iPhone Safari（User-Agent、Client Hints、navigator.platform） */
@@ -81,7 +80,6 @@ class SettingsStore(private val context: Context) {
         val engine = stringPreferencesKey("engine")
         val desktop = booleanPreferencesKey("desktop")
         val native = booleanPreferencesKey("native_player")
-        val reduce = booleanPreferencesKey("reduce_transparency")
         val bg = stringPreferencesKey("start_background")
         val iphone = booleanPreferencesKey("identify_as_iphone")
         val quick = stringPreferencesKey("quick_engines")
@@ -108,7 +106,6 @@ class SettingsStore(private val context: Context) {
         engine = this[K.engine]?.let { runCatching { SearchEngine.valueOf(it) }.getOrNull() } ?: SearchEngine.Google,
         desktopByDefault = this[K.desktop] ?: false,
         nativePlayer = false, // 一律用網頁自己的播放器（選項已拿掉）
-        reduceTransparency = this[K.reduce] ?: false,
         startBackground = this[K.bg],
         identifyAsIPhone = this[K.iphone] ?: true,
         quickEngines = this[K.quick]?.split(',')?.mapNotNull { runCatching { SearchEngine.valueOf(it) }.getOrNull() }
@@ -143,7 +140,6 @@ class SettingsStore(private val context: Context) {
             p[K.engine] = n.engine.name
             p[K.desktop] = n.desktopByDefault
             p[K.native] = n.nativePlayer
-            p[K.reduce] = n.reduceTransparency
             p[K.iphone] = n.identifyAsIPhone
             p[K.quick] = n.quickEngines.joinToString(",") { it.name }
             p[K.trEngine] = n.translateEngine.name

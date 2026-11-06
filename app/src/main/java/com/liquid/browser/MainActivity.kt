@@ -38,7 +38,6 @@ import com.liquid.browser.core.Motion
 import com.liquid.browser.core.installImageLoader
 import com.liquid.browser.player.PlayerScreen
 import com.liquid.browser.ui.browser.BrowserScreen
-import com.liquid.browser.ui.glass.LocalReduceTransparency
 import dev.chrisbanes.haze.ExperimentalHazeApi
 import dev.chrisbanes.haze.HazeFeatureFlags
 
@@ -150,7 +149,7 @@ class MainActivity : ComponentActivity() {
             }
             // 播放狀態改變時更新子母畫面參數（Android 12+ 播放中離開 App 自動進入子母畫面）
             LaunchedEffect(player, player?.isPlaying, player?.videoAspect) { setPictureInPictureParams(pipParams()) }
-            CompositionLocalProvider(LocalReduceTransparency provides settings.reduceTransparency) {
+            run {
                 // testTagsAsResourceId：讓 Macrobenchmark／UiAutomator 能以 testTag 找到元件
                 Box(Modifier.fillMaxSize().semantics { testTagsAsResourceId = true }) {
                     // 播放器開著時，瀏覽畫面的系統模糊小視窗（網址列、起始頁的分段鈕）全部收起，否則會浮在播放器上面

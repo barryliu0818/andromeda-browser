@@ -306,7 +306,7 @@ fun SettingsContent(vm: BrowserViewModel, tone: Tone) {
             // 直向時網址列在底部（單手好按）或頂部（傳統瀏覽器的位置）；橫向一律在頂部。
             // 跟 Safari 一樣用手機示意圖選：看圖就知道網址列會在哪
             Row(
-                Modifier.fillMaxWidth().groupItem(0, 3, tone).padding(vertical = 16.dp),
+                Modifier.fillMaxWidth().groupItem(0, 2, tone).padding(vertical = 16.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
                 listOf(BarLayout.Compact to t("精簡"), BarLayout.Bottom to t("底部"), BarLayout.Top to t("頂部")).forEach { (layout, label) ->
@@ -329,11 +329,8 @@ fun SettingsContent(vm: BrowserViewModel, tone: Tone) {
             }
         }
         item {
-            GroupToggle(1, 3, tone, t("降低透明度"), s.reduceTransparency, leading = { IconTile("contrast", Color(0xFF8E8E93)) }) { v -> vm.updateSettings { it.copy(reduceTransparency = v) } }
-        }
-        item {
             GroupRow(
-                2, 3, tone, t("起始頁背景圖"), subtitle = if (s.startBackground != null) t("已設定") else t("預設（搜尋引擎色場）"),
+                1, 2, tone, t("起始頁背景圖"), subtitle = if (s.startBackground != null) t("已設定") else t("預設（搜尋引擎色場）"),
                 leading = { IconTile("wallpaper", Color(0xFFAF52DE)) },
                 onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                 trailing = {

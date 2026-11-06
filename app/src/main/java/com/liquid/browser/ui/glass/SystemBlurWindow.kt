@@ -273,8 +273,7 @@ internal class BlurDialog(context: Context, parent: CompositionContext) : Dialog
 fun crossWindowBlurEnabled(): Boolean {
     val context = LocalContext.current
     val enabled = remember { context.getSystemService(WindowManager::class.java)?.isCrossWindowBlurEnabled == true }
-    // 「降低透明度」：不開系統模糊視窗（以前網址列那一列沒看這個設定，照樣用模糊視窗，合成器每幀還在做模糊）
-    return enabled && !LocalReduceTransparency.current
+    return enabled
 }
 
 /** 分頁總覽、播放器、網頁影片全螢幕蓋住畫面時為 true：系統模糊小視窗全部隱藏（否則會浮在它們上面） */

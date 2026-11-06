@@ -67,7 +67,6 @@ import kotlin.coroutines.resume
  *    WebView 像素零額外擷取成本。
  *  - Android 12：Haze 自動降級為 RenderEffect 模糊＋色調（無折射 shader），再加上本模組的陰影。
  *  - Android 11 以下：Haze 自動改畫半透明純色底（scrim），本模組再加陰影。
- *  - 「降低透明度」：LocalReduceTransparency 為 true 時改為不透明底＋高光邊框。
  *
  * WebView 擷取驗證（Android 17 / API 37.0 模擬器，非原生 backdrop 路徑）：
  *  Haze 以 GraphicsLayer 錄製 hazeSource 內容時，WebView 的畫面能被正確錄入並模糊、折射，
@@ -105,9 +104,6 @@ private val Optics = GlassOptics(
     refractionHeightFraction = GlassTokens.RefractionEdge,
     blurRadius = OpticalSizeValue.Fixed(GlassTokens.BlurRadius),
 )
-
-/** 「降低透明度」設定：開啟後所有玻璃改為不透明底色。由 MainActivity 依設定提供。 */
-val LocalReduceTransparency = staticCompositionLocalOf { false }
 
 /**
  * 系統能否直接取樣已合成的視窗畫面（Android 17 QPR2 = API 37.2 起）。
@@ -215,10 +211,6 @@ fun Modifier.liquidGlass(
             offset = DpOffset(0.dp, GlassTokens.ShadowOffsetY),
         ),
     )
-    // 降低透明度：不透明底色＋高光邊框＋陰影，方便閱讀
-    if (LocalReduceTransparency.current) {
-        return base.clip(shape).background(style.tint.compositeOverOpaque()).border(0.8.dp, RimBrush, shape)
-    }
     // 沒有原生 backdrop 時的輕量磨砂：92% 色調＋高光邊框，不跑 Haze 模糊（網頁上不能模糊 WebView；
     // 輸入時玻璃隨鍵盤移動，每幀重新模糊整個首頁會讓 GPU 掉幀）
     if (LocalInBlurWindow.current) {
@@ -257,7 +249,7 @@ fun Modifier.liquidGlassGroup(): Modifier = hazeGlassContainer(GlassTokens.Merge
 /** 這裡的玻璃會不會放進系統模糊視窗（沒有原生 backdrop、系統開著跨視窗模糊、不在另一個模糊視窗裡） */
 @Composable
 fun usesBlurWindow(): Boolean =
-    !PlatformBackdrop && !LocalInBlurWindow.current && !LocalReduceTransparency.current && crossWindowBlurEnabled()
+    !PlatformBackdrop && !LocalInBlurWindow.current &&crossWindowBlurEnabled()
 
 /** 最常用的形式：一塊玻璃，內含內容。 */
 @Composable
