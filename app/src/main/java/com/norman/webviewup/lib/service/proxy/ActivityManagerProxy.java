@@ -29,4 +29,11 @@ public abstract class ActivityManagerProxy extends RuntimeProxy {
      */
     @Method(value = "bindServiceInstance", fuzzy = true)
     protected abstract Object bindServiceInstance(Object... args);
+
+    /**
+     * Android 17：Chromium 調整子行程優先順序時呼叫 rebindService → updateServiceBindings，
+     * 但子行程是經 bindService 轉接綁定的，旗標對不上，系統會丟 IllegalArgumentException 讓 App 閃退。
+     */
+    @Method(value = "updateServiceBindings", fuzzy = true)
+    protected abstract Object updateServiceBindings(Object... args);
 }

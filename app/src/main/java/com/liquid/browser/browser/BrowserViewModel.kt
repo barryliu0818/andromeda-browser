@@ -243,9 +243,6 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     /** 0 = 控制項展開，1 = 收合成小膠囊；由 UI 以彈簧動畫往 [collapsed] 過渡 */
     var collapse by mutableFloatStateOf(0f)
 
-    /** 最近關閉的分頁（只記一般分頁，供起始頁顯示） */
-    val recentlyClosed = mutableStateListOf<Visit>()
-
     /** 網域 → 高解析度圖示網址 */
     val icons: StateFlow<Map<String, String>> = db.icons().all()
         .map { list -> list.associate { it.host to it.iconUrl } }
@@ -338,11 +335,6 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     fun close(tab: Tab) {
         val siblings = tabs.filter { it.incognito == tab.incognito }
         val i = siblings.indexOf(tab)
-        if (!tab.incognito && !tab.isBlank) {
-            recentlyClosed.removeAll { it.url == tab.url }
-            recentlyClosed.add(0, Visit(tab.url, tab.title))
-            if (recentlyClosed.size > 10) recentlyClosed.removeAt(recentlyClosed.lastIndex)
-        }
         tabs.remove(tab)
         tabs.forEach { if (it.opener == tab) it.opener = null }
         (tab.webView.parent as? ViewGroup)?.removeView(tab.webView)

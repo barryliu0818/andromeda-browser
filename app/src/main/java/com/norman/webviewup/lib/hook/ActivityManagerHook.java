@@ -115,6 +115,17 @@ public class ActivityManagerHook extends BinderHook {
                 }
                 return invoke();
             }
+
+            @Override
+            protected Object updateServiceBindings(Object... args) {
+                // 只是調整子行程優先順序：失敗（Android 17 拒絕更新轉接綁定的旗標）就略過，不讓整個 App 閃退
+                try {
+                    return invoke();
+                } catch (Throwable t) {
+                    Log.w(TAG, "updateServiceBindings 失敗，略過", t);
+                    return null;
+                }
+            }
         };
 
         proxy.setTarget(mOriginalAm);

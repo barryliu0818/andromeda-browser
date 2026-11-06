@@ -233,6 +233,9 @@ class Tab(
     var translated by androidx.compose.runtime.mutableStateOf(false)
     /** 這個頁面上次翻成的語言（換語言時要先丟掉舊譯文） */
     var trTarget: String? = null
+
+    /** 分兩步登入時第一步輸入的帳號（來源, 帳號） */
+    private var pwUser: Pair<String, String>? = null
     var trSent by androidx.compose.runtime.mutableIntStateOf(0)
     var trDone by androidx.compose.runtime.mutableIntStateOf(0)
 
@@ -644,7 +647,12 @@ class Tab(
                     when (type) {
                         "pw_focus" -> listener.onPasswordField(this, origin, json.optString("mode") == "new")
                         "pw_blur" -> listener.onPasswordField(this, null, false)
-                        "pw_submit" -> json.optString("pass").takeIf { it.isNotEmpty() }?.let { listener.onPasswordSubmit(this, origin, json.optString("user"), it) }
+                        // 分兩步的登入：第一步輸入的帳號先記著（只記這個網站的），密碼頁送出時帳號是空的就用它
+                        "pw_user" -> pwUser = origin to json.optString("user")
+                        "pw_submit" -> json.optString("pass").takeIf { it.isNotEmpty() }?.let { pass ->
+                            val user = json.optString("user").ifEmpty { pwUser?.takeIf { it.first == origin }?.second.orEmpty() }
+                            listener.onPasswordSubmit(this, origin, user, pass)
+                        }
                     }
                     return@addWebMessageListener
                 }

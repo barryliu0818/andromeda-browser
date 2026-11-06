@@ -155,7 +155,9 @@ fun StartPage(
     Box(modifier) {
         // 玻璃的取樣來源：自訂背景圖（帶模糊），或搜尋引擎色場；Android 12 以下改加深遮罩
         Box(Modifier.fillMaxSize().hazeSource(haze)) {
-            if (background != null) {
+            // 無痕：純黑底（Brave 私密分頁的做法），不顯示背景圖與搜尋引擎色場
+            if (tab.incognito) Box(Modifier.fillMaxSize().background(Color.Black))
+            else if (background != null) {
                 AsyncImage(background, null, Modifier.fillMaxSize().blur(24.dp), contentScale = ContentScale.Crop)
                 Box(Modifier.fillMaxSize().background((if (dark) Color.Black else Color.White).copy(alpha = if (Build.VERSION.SDK_INT >= 31) 0.25f else 0.55f)))
             } else if (glow) EngineGlow(settings.engine, dark)
@@ -234,7 +236,7 @@ private fun IncognitoNote(content: Color, padding: PaddingValues) {
 }
 
 /**
- * 常用網站頁（Safari 起始頁）：「常用網站」4×2 圖示格、「閱讀列表」最多三張玻璃卡片、最近關閉的分頁。
+ * 常用網站頁（Safari 起始頁）：「常用網站」4×2 圖示格、「閱讀列表」最多三張玻璃卡片。
  * 每段標題右側「全部顯示 ›」切到對應的分段頁。
  */
 @Composable
@@ -285,13 +287,6 @@ private fun FavoritesPage(
                     scope.launch { vm.db.reading().setRead(r.url, true) }
                     onOpen(r.url)
                 }
-            }
-        }
-        if (vm.recentlyClosed.isNotEmpty()) {
-            item(key = "rc") { SectionHeader(t("最近關閉的分頁"), content, null, top = 28.dp) }
-            val closed = vm.recentlyClosed.take(5)
-            itemsIndexed(closed, key = { _, v -> "c${v.url}" }) { i, v ->
-                SiteRow(v.url, v.title.ifBlank { v.url }, Uri.parse(v.url).host.orEmpty(), icons, content, Modifier.animateItem(), Triple(i, closed.size, tone)) { onOpen(v.url) }
             }
         }
     }

@@ -5,7 +5,8 @@
   var post = function (m) { try { if (window.LiquidBridge) LiquidBridge.postMessage(JSON.stringify(m)); } catch (e) {} };
   var form = null; // 最近一次聚焦的登入區塊（form，或沒有 form 時的父層）
 
-  var visible = function (el) { return el && el.offsetParent !== null && !el.disabled && !el.readOnly; };
+  // 有畫在畫面上（getClientRects：固定定位的彈出式登入框也算；offsetParent 對 position:fixed 一律是 null）
+  var visible = function (el) { return el && el.getClientRects().length > 0 && !el.disabled && !el.readOnly; };
   var passwords = function (root) { return Array.prototype.filter.call(root.querySelectorAll('input[type=password]'), visible); };
   // 帳號欄：密碼欄前面最後一個可見的文字／email／電話欄位
   var userField = function (root, pw) {
@@ -51,26 +52,45 @@
     el.dispatchEvent(new Event('change', { bubbles: true }));
   };
 
+  // 記住輸入過的帳號與密碼（Chrome 的做法）：登入按鈕常不在表單裡、送出後密碼欄馬上被移除，
+  // 分兩步的登入（Google：先帳號、下一頁才密碼）在密碼頁根本沒有帳號欄
+  var typedPw = null, typedUser = '';
+  document.addEventListener('input', function (e) {
+    var t = e.target;
+    if (!(t instanceof HTMLInputElement)) return;
+    if (t.type === 'password') { typedPw = t; return; }
+    var area = areaOf(t);
+    // 還沒出現密碼欄的帳號頁（分兩步登入的第一步）：帳號類欄位交給 App 記著，到密碼頁再配對
+    if (/^(email|tel|text)$/i.test(t.type) && /user|login|mail|account|identifier|phone|name/i.test((t.name || '') + (t.id || '') + (t.autocomplete || '') + t.type)) {
+      typedUser = t.value;
+      if (!area) post({ type: 'pw_user', user: t.value });
+    }
+  }, true);
+
   var lastSent = '';
   var capture = function () {
-    if (!form || !document.contains(form)) return;
-    var pws = passwords(form);
-    var pw = pws[pws.length - 1];
+    var pw = typedPw;
     if (!pw || !pw.value) return;
-    var u = userField(form, pws[0]);
-    var sig = (u ? u.value : '') + '\u0000' + pw.value;
+    var area = form && form.contains(pw) ? form : areaOf(pw);
+    var u = area ? userField(area, pw) : null;
+    var user = (u && u.value) || typedUser;
+    var sig = user + '\u0000' + pw.value;
     if (sig === lastSent) return;
     lastSent = sig;
-    post({ type: 'pw_submit', user: u ? u.value : '', pass: pw.value });
+    post({ type: 'pw_submit', user: user, pass: pw.value });
   };
   document.addEventListener('submit', capture, true);
   document.addEventListener('click', function (e) {
-    var b = e.target.closest && e.target.closest('button, input[type=submit], [role=button]');
-    if (b && form && form.contains(b)) setTimeout(capture, 0);
+    var b = e.target.closest && e.target.closest('button, input[type=submit], input[type=button], [role=button], a');
+    if (!b || !typedPw) return;
+    // 密碼欄旁邊的「顯示密碼」眼睛不算送出
+    if (typedPw.parentElement && typedPw.parentElement.contains(b) && !(b.textContent || '').trim() && !b.matches('[type=submit]')) return;
+    setTimeout(capture, 0);
   }, true);
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter' && e.target instanceof HTMLInputElement && form && form.contains(e.target)) capture();
+    if (e.key === 'Enter' && e.target instanceof HTMLInputElement) capture();
   }, true);
+  window.addEventListener('pagehide', capture, true);
 
   window.__lqPw = {
     fill: function (user, pass) {
