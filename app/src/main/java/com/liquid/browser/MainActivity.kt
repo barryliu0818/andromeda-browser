@@ -144,6 +144,27 @@ class MainActivity : ComponentActivity() {
                     ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
                 ) notif.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
+            // 網站要位置／相機／麥克風、上傳檔案要拍照：向 Android 要系統權限
+            val runtime = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
+                val ask = vm.runtimePermission
+                vm.runtimePermission = null
+                ask?.onResult?.invoke(res)
+            }
+            LaunchedEffect(vm.runtimePermission) { vm.runtimePermission?.let { runtime.launch(it.permissions) } }
+            // 網頁的 <input type=file>：檔案、相簿，或直接拍照／錄影
+            val files = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+                val ask = vm.fileChooser ?: return@rememberLauncherForActivityResult
+                vm.fileChooser = null
+                ask.callback.onReceiveValue(com.liquid.browser.browser.FileChooser.result(this@MainActivity, ask, r.resultCode, r.data))
+            }
+            LaunchedEffect(vm.fileChooser) {
+                val ask = vm.fileChooser ?: return@LaunchedEffect
+                val intent = com.liquid.browser.browser.FileChooser.intent(this@MainActivity, ask)
+                if (runCatching { files.launch(intent) }.isFailure) {
+                    vm.fileChooser = null
+                    ask.callback.onReceiveValue(null)
+                }
+            }
             LaunchedEffect(vm.localNetworkRequest) {
                 if (vm.localNetworkRequest != null && Build.VERSION.SDK_INT >= 37) localNet.launch(Manifest.permission.ACCESS_LOCAL_NETWORK)
             }

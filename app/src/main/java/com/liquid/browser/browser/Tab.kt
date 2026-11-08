@@ -123,6 +123,12 @@ class Tab(
         fun injectedScript(): String
         /** Android 17 區域網路權限不足而無法載入（ERR_LOCAL_NETWORK_PERMISSION_MISSING） */
         fun onLocalNetworkNeeded(tab: Tab)
+        /** 網頁要位置／相機／麥克風（geolocation、getUserMedia） */
+        fun onSitePermission(tab: Tab, origin: String, kinds: Set<SiteKind>, result: (Boolean) -> Unit)
+        /** 網頁取消了還沒回覆的權限要求 */
+        fun onSitePermissionCancel(tab: Tab)
+        /** 網頁的 <input type=file>（含 capture 拍照）：回傳 true 表示會呼叫 callback */
+        fun onFileChooser(tab: Tab, callback: android.webkit.ValueCallback<Array<Uri>>, params: WebChromeClient.FileChooserParams): Boolean
         /** YouTube 字幕翻譯：一批字幕要翻譯（回填 __lqYt.apply） */
         fun onSubtitleBatch(tab: Tab, id: Int, texts: List<String>)
         /** 開了字幕翻譯，但這部影片沒有字幕可用 */
@@ -560,6 +566,34 @@ class Tab(
                 }
             }
             override fun onHideCustomView() = listener.onCustomView(null, null)
+
+            // 定位（navigator.geolocation）：先問使用者這個網站可不可以，再要系統定位權限
+            override fun onGeolocationPermissionsShowPrompt(origin: String, callback: android.webkit.GeolocationPermissions.Callback) {
+                listener.onSitePermission(this@Tab, origin, setOf(SiteKind.Location)) { ok -> callback.invoke(origin, ok, false) }
+            }
+            override fun onGeolocationPermissionsHidePrompt() = listener.onSitePermissionCancel(this@Tab)
+
+            // 相機／麥克風（getUserMedia、視訊通話、掃碼）；DRM 影片（PROTECTED_MEDIA_ID）直接允許
+            override fun onPermissionRequest(request: android.webkit.PermissionRequest) {
+                val res = request.resources
+                val kinds = res.mapNotNull {
+                    when (it) {
+                        android.webkit.PermissionRequest.RESOURCE_VIDEO_CAPTURE -> SiteKind.Camera
+                        android.webkit.PermissionRequest.RESOURCE_AUDIO_CAPTURE -> SiteKind.Mic
+                        else -> null
+                    }
+                }.toSet()
+                val drm = res.filter { it == android.webkit.PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID }
+                if (kinds.isEmpty()) return if (drm.isNotEmpty()) request.grant(drm.toTypedArray()) else request.deny()
+                val origin = request.origin.let { "${it.scheme}://${it.authority}" }
+                listener.onSitePermission(this@Tab, origin, kinds) { ok ->
+                    if (ok) request.grant(res.filter { it != android.webkit.PermissionRequest.RESOURCE_MIDI_SYSEX }.toTypedArray()) else request.deny()
+                }
+            }
+            override fun onPermissionRequestCanceled(request: android.webkit.PermissionRequest) = listener.onSitePermissionCancel(this@Tab)
+
+            override fun onShowFileChooser(view: WebView, callback: android.webkit.ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean =
+                listener.onFileChooser(this@Tab, callback, params)
 
             // 只接受使用者點擊開的新視窗；新分頁的第一個網址若在廣告清單裡，onAdClickBlocked 會把它關掉
             override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message): Boolean {

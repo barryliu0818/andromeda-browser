@@ -128,6 +128,62 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
 
     override fun onLocalNetworkNeeded(tab: Tab) { localNetworkRequest = tab }
 
+    // ── 網站權限（位置／相機／麥克風）與檔案上傳 ──
+    /** 底部提示列「xxx 要使用你的位置」：允許／封鎖 */
+    var sitePermission by mutableStateOf<SitePermissionAsk?>(null)
+    /** 要向 Android 要的系統權限（MainActivity 發出要求） */
+    var runtimePermission by mutableStateOf<RuntimeAsk?>(null)
+    /** 等著開檔案選擇器／相機的 <input type=file>（MainActivity 開啟） */
+    var fileChooser by mutableStateOf<FileChooserAsk?>(null)
+    /** 這次開 App 期間使用者對各網站的決定（"origin|種類" → 允許）；無痕分頁不記 */
+    private val siteDecisions = HashMap<String, Boolean>()
+
+    private fun granted(p: String) =
+        androidx.core.content.ContextCompat.checkSelfPermission(getApplication(), p) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+    override fun onSitePermission(tab: Tab, origin: String, kinds: Set<SiteKind>, result: (Boolean) -> Unit) {
+        if (kinds.any { siteDecisions["$origin|$it"] == false }) return result(false)
+        if (kinds.all { siteDecisions["$origin|$it"] == true }) return requestRuntime(kinds, result)
+        sitePermission?.result?.invoke(false)
+        sitePermission = SitePermissionAsk(tab, origin, kinds, result)
+    }
+
+    override fun onSitePermissionCancel(tab: Tab) { if (sitePermission?.tab == tab) sitePermission = null }
+
+    fun answerSitePermission(allow: Boolean) {
+        val a = sitePermission ?: return
+        sitePermission = null
+        if (!a.tab.incognito) a.kinds.forEach { siteDecisions["${a.origin}|$it"] = allow }
+        if (allow) requestRuntime(a.kinds, a.result) else a.result(false)
+    }
+
+    /** 已有系統權限就直接允許；沒有就跟 Android 要（位置只要精確或大概其中一個） */
+    private fun requestRuntime(kinds: Set<SiteKind>, result: (Boolean) -> Unit) {
+        val ok = { has: (String) -> Boolean -> kinds.all { k -> k.android.any(has) } }
+        if (ok(::granted)) return result(true)
+        runtimePermission = RuntimeAsk(kinds.flatMap { it.android }.filterNot(::granted).toTypedArray()) { res ->
+            val allowed = ok { granted(it) || res[it] == true }
+            if (!allowed) showToast(t("請到系統設定允許使用%1\$s", kinds.joinToString("、") { t(it.label) }))
+            result(allowed)
+        }
+    }
+
+    override fun onFileChooser(tab: Tab, callback: android.webkit.ValueCallback<Array<Uri>>, params: WebChromeClient.FileChooserParams): Boolean {
+        fileChooser?.callback?.onReceiveValue(null)
+        fileChooser = null
+        val probe = FileChooserAsk(callback, params, camera = false)
+        val canCapture = probe.wantsImage || probe.wantsVideo
+        // 要放「拍照」就先要相機權限（App 有宣告 CAMERA 時，沒權限開相機 App 會被系統擋下）
+        if (!canCapture || granted(android.Manifest.permission.CAMERA)) {
+            fileChooser = FileChooserAsk(callback, params, camera = canCapture)
+        } else {
+            runtimePermission = RuntimeAsk(arrayOf(android.Manifest.permission.CAMERA)) { res ->
+                fileChooser = FileChooserAsk(callback, params, camera = res[android.Manifest.permission.CAMERA] == true)
+            }
+        }
+        return true
+    }
+
     /** 跳轉 App 的提示列（BrowserScreen 顯示）；一段時間沒按就自動收起 */
     var appPrompt by mutableStateOf<AppPrompt?>(null)
         private set
