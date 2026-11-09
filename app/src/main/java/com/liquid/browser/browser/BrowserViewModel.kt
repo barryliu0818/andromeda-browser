@@ -144,7 +144,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         val decided = kinds.map { SitePermissionStore.decision(origin, it, tab.incognito) }
         // 任一種被封鎖（使用者封鎖、預設封鎖、自動封鎖 7 天）：直接拒絕，不再問
         if (decided.any { it == false }) return result(false)
-        if (decided.all { it == true }) return requestRuntime(kinds, result)
+        if (decided.all { it == true }) return requestRuntime(tab, kinds, SiteKind.Location in kinds && SitePermissionStore.approx(origin, tab.incognito), result)
         permissionQueue += SitePermissionAsk(tab, origin, kinds, result)
     }
 
@@ -157,15 +157,15 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     }
 
     /** 對話框的「允許」「封鎖」；allow＝null 表示沒選就關掉（返回鍵、點外面）＝dismiss */
-    fun answerSitePermission(allow: Boolean?, lifetime: PermLifetime) {
+    fun answerSitePermission(allow: Boolean?, lifetime: PermLifetime, approx: Boolean = false) {
         val a = sitePermission ?: return
         permissionQueue.remove(a)
         if (allow == null) {
             a.kinds.forEach { SitePermissionStore.noAnswer(a.origin, it, dismissed = true) }
             return a.result(false)
         }
-        a.kinds.forEach { SitePermissionStore.set(a.origin, it, allow, lifetime, a.tab.incognito) }
-        if (allow) requestRuntime(a.kinds, a.result) else a.result(false)
+        a.kinds.forEach { SitePermissionStore.set(a.origin, it, allow, lifetime, a.tab.incognito, approx) }
+        if (allow) requestRuntime(a.tab, a.kinds, approx && SiteKind.Location in a.kinds, a.result) else a.result(false)
     }
 
     /** 「直到我關閉這個網站」：沒有分頁開著那個網站就忘掉 */
@@ -175,10 +175,15 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     )
 
     /** 已有系統權限就直接允許；沒有就跟 Android 要（位置只要精確或大概其中一個） */
-    private fun requestRuntime(kinds: Set<SiteKind>, result: (Boolean) -> Unit) {
+    private fun requestRuntime(tab: Tab, kinds: Set<SiteKind>, approx: Boolean, result: (Boolean) -> Unit) {
+        // 大概位置：先把這一頁切成模糊座標，再交出位置
+        val result = { ok: Boolean -> if (ok && approx) tab.markGeoApprox(); result(ok) }
         val ok = { has: (String) -> Boolean -> kinds.all { k -> k.android.any(has) } }
-        if (ok(::granted)) return result(true)
-        runtimePermission = RuntimeAsk(kinds.flatMap { it.android }.filterNot(::granted).toTypedArray()) { res ->
+        // 大概位置只要「大概位置」權限；精確位置要精確＋大概一起要（App 只有大概位置時 Android 會問要不要升級成精確）。
+        // 使用者在 Android 對話框仍選大概位置也算允許，網頁拿到的就是大概位置
+        val wanted = kinds.flatMap { if (it == SiteKind.Location && approx) listOf(android.Manifest.permission.ACCESS_COARSE_LOCATION) else it.android }
+        if (wanted.all(::granted)) return result(true)
+        runtimePermission = RuntimeAsk(wanted.toTypedArray()) { res ->
             val allowed = ok { granted(it) || res[it] == true }
             if (!allowed) showToast(t("請到系統設定允許使用%1\$s", kinds.joinToString("、") { t(it.label) }))
             result(allowed)
@@ -186,32 +191,50 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     }
 
     /**
-     * 網頁上傳檔案（Chromium SelectFileDialog）：要拍照／錄影先要相機權限、要錄音先要麥克風權限；
-     * capture 而權限被拒絕＝不給檔案；一般上傳被拒絕則只是選單裡沒有相機。
+     * 網頁上傳檔案：收圖片／影片先出 Safari 式來源選單（照片圖庫／拍照／錄影／選擇檔案，capture 也一樣讓使用者選），
+     * 拍照／錄影時才要相機權限；其他類型直接開檔案選擇器（收音訊時先要麥克風權限，選單裡才有錄音）。
      */
     override fun onFileChooser(tab: Tab, callback: android.webkit.ValueCallback<Array<Uri>>, params: WebChromeClient.FileChooserParams): Boolean {
         fileChooser?.callback?.onReceiveValue(null)
         fileChooser = null
-        val probe = FileChooserAsk(callback, params, camera = false)
-        val needCam = probe.wantsImage || probe.wantsVideo
-        val needMic = probe.wantsAudio
-        val missing = buildList {
-            if (needCam && !granted(android.Manifest.permission.CAMERA)) add(android.Manifest.permission.CAMERA)
-            if (needMic && !granted(android.Manifest.permission.RECORD_AUDIO)) add(android.Manifest.permission.RECORD_AUDIO)
-        }
-        if (missing.isEmpty()) {
-            fileChooser = FileChooserAsk(callback, params, camera = needCam, mic = needMic)
+        val ask = FileChooserAsk(callback, params)
+        // 收圖片／影片：先出來源選單（照片圖庫／拍照／錄影／選擇檔案）
+        if (ask.wantsImage || ask.wantsVideo) {
+            fileChooser = ask
             return true
         }
-        runtimePermission = RuntimeAsk(missing.toTypedArray()) { res ->
-            fun ok(p: String) = granted(p) || res[p] == true
-            val cam = needCam && ok(android.Manifest.permission.CAMERA)
-            val mic = needMic && ok(android.Manifest.permission.RECORD_AUDIO)
-            val capture = probe.captureImage || probe.captureVideo || probe.captureAudio
-            if (capture && !(cam || mic)) callback.onReceiveValue(null)
-            else fileChooser = FileChooserAsk(callback, params, camera = cam, mic = mic)
+        // 其他類型直接開檔案選擇器；收音訊時先要麥克風權限，選單裡才有「錄音」
+        val mic = android.Manifest.permission.RECORD_AUDIO
+        if (ask.wantsAudio && !granted(mic)) {
+            runtimePermission = RuntimeAsk(arrayOf(mic)) { res ->
+                ask.mic = granted(mic) || res[mic] == true
+                ask.source = FileSource.Files
+                fileChooser = ask
+            }
+        } else {
+            ask.mic = ask.wantsAudio
+            ask.source = FileSource.Files
+            fileChooser = ask
         }
         return true
+    }
+
+    /** 來源選單選了一項；null＝取消。拍照／錄影要先有相機權限，被拒絕就留在選單（還能選相簿或檔案） */
+    fun pickFileSource(src: FileSource?) {
+        val ask = fileChooser ?: return
+        if (src == null) {
+            fileChooser = null
+            return ask.callback.onReceiveValue(null)
+        }
+        val cam = android.Manifest.permission.CAMERA
+        if ((src == FileSource.Photo || src == FileSource.Video) && !granted(cam)) {
+            runtimePermission = RuntimeAsk(arrayOf(cam)) { res ->
+                if (granted(cam) || res[cam] == true) ask.source = src
+                else showToast(t("請到系統設定允許使用%1\$s", t("相機")))
+            }
+            return
+        }
+        ask.source = src
     }
 
     /** 跳轉 App 的提示列（BrowserScreen 顯示）；一段時間沒按就自動收起 */
@@ -372,6 +395,12 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         // 「Brave 防追蹤」開關改變時重新註冊防指紋腳本
         viewModelScope.launch {
             settings.map { it.shields }.distinctUntilChanged().drop(1).collect { on -> tabs.forEach { it.applyShields(on) } }
+        }
+        // 哪些網站只給大概位置改變時重新註冊位置腳本（下次載入生效）
+        viewModelScope.launch {
+            androidx.compose.runtime.snapshotFlow { SitePermissionStore.version }
+                .map { SitePermissionStore.approxOrigins(false) to SitePermissionStore.approxOrigins(true) }
+                .distinctUntilChanged().drop(1).collect { tabs.forEach { it.applyGeo() } }
         }
     }
 

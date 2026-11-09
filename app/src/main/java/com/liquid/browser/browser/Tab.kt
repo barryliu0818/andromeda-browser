@@ -180,6 +180,18 @@ class Tab(
         if (on && !legacyInject) shieldsHandler = WebViewCompat.addDocumentStartJavaScript(webView, Shields.fingerprintJs, setOf("*"))
     }
 
+    private var geoHandler: ScriptHandler? = null
+
+    /** 「大概位置」的開頁腳本（網站權限改變後重新註冊，下次載入生效） */
+    fun applyGeo() {
+        geoHandler?.remove()
+        geoHandler = null
+        if (!legacyInject) geoHandler = WebViewCompat.addDocumentStartJavaScript(webView, geoApproxScript(SitePermissionStore.approxOrigins(incognito)), setOf("*"))
+    }
+
+    /** 剛選了大概位置：目前這一頁馬上改成模糊座標（位置在這之後才送給網頁） */
+    fun markGeoApprox() = webView.evaluateJavascript("window.__lqGeoApprox=true", null)
+
     /** 擴充功能的開頁腳本（安裝、移除、開關後重新註冊）。無痕分頁不跑擴充，跟 Firefox 的預設一樣 */
     fun applyExtensions() {
         extHandler?.remove()
@@ -469,6 +481,7 @@ class Tab(
                 // 舊版 WebView 沒有開頁腳本：擴充改在這裡注入（只有最上層頁面）
                 if (legacyInject && !incognito) Extensions.documentStartScript()?.let { view.evaluateJavascript(it, null) }
                 if (legacyInject && listener.shields()) view.evaluateJavascript(Shields.fingerprintJs, null)
+                if (legacyInject) view.evaluateJavascript(geoApproxScript(SitePermissionStore.approxOrigins(incognito)), null)
                 translated = false
                 trTarget = null
                 trSent = 0
@@ -629,6 +642,7 @@ class Tab(
         installVideoBridge()
         applyExtensions()
         applyShields(listener.shields())
+        applyGeo()
         webView.setOnScrollChangeListener { v, _, y, _, oldY ->
             listener.onScroll(this, y - oldY, !v.canScrollVertically(1))
         }

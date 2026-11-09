@@ -350,17 +350,27 @@ private fun SitePermissionRows(tab: Tab, tone: Tone) {
     kinds.forEachIndexed { i, kind ->
         val ex = list.firstOrNull { it.origin == origin && it.kind == kind }
         val ask = com.liquid.browser.browser.SitePermissionStore.askByDefault(kind)
-        val selected = when { ex == null -> 0; ex.allow -> 1; else -> 2 }
+        // 位置的「允許」分成精確位置／大概位置：選項 詢問／精確位置／大概位置／封鎖
+        val geo = kind == com.liquid.browser.browser.SiteKind.Location
+        val options = buildList {
+            add(if (ask) t("詢問（預設）") else t("封鎖（預設）"))
+            add(if (geo) t("精確位置") else t("允許"))
+            if (geo) add(t("大概位置"))
+            add(t("封鎖"))
+        }
+        val selected = when { ex == null -> 0; ex.allow && ex.approx -> 2; ex.allow -> 1; else -> options.lastIndex }
         GroupMenuRow(
-            i, kinds.size, tone, t(kind.label).replaceFirstChar { it.uppercase() },
-            listOf(if (ask) t("詢問（預設）") else t("封鎖（預設）"), t("允許"), t("封鎖")), selected,
+            i, kinds.size, tone, t(kind.label).replaceFirstChar { it.uppercase() }, options, selected,
             subtitle = ex?.let { permissionLifetimeText(it) },
             leading = { IconTile(kind.icon, Color(0xFF007AFF)) },
         ) { pick ->
             val store = com.liquid.browser.browser.SitePermissionStore
             when (pick) {
                 0 -> store.reset(origin, kind)
-                else -> store.set(origin, kind, pick == 1, com.liquid.browser.browser.PermLifetime.Forever, tab.incognito)
+                else -> store.set(
+                    origin, kind, pick != options.lastIndex, com.liquid.browser.browser.PermLifetime.Forever, tab.incognito,
+                    approx = geo && pick == 2,
+                )
             }
         }
     }

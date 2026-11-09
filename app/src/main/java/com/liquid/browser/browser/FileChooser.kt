@@ -5,16 +5,15 @@ import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.provider.MediaStore
-import android.webkit.WebChromeClient
 import androidx.core.content.FileProvider
 import com.liquid.browser.core.t
 import java.io.File
 
 /**
- * 網頁上傳檔案（<input type=file>），照 Chromium 的 SelectFileDialog：
- *  - 有 capture 且只收圖片＝直接開相機；只收影片＝直接錄影；只收音訊＝直接錄音
- *  - 其他情況開系統檔案選擇器，前面加上「相機」「錄影」「錄音」（依 accept 類型，且有權限才加）
+ * 網頁上傳檔案（<input type=file>）：收圖片／影片時先出 Safari 式來源選單（照片圖庫／拍照／錄影／選擇檔案），
+ * 有 capture 也一樣讓使用者選（不強制開相機）；其他類型直接開系統檔案選擇器（收音訊時加「錄音」）。
  */
 object FileChooser {
     private fun captureFile(context: Context, ext: String): Uri {
@@ -31,40 +30,50 @@ object FileChooser {
         addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
 
-    private fun photo(context: Context, ask: FileChooserAsk) =
-        cameraIntent(MediaStore.ACTION_IMAGE_CAPTURE, captureFile(context, "jpg").also { ask.photo = it })
-    private fun video(context: Context, ask: FileChooserAsk) =
-        cameraIntent(MediaStore.ACTION_VIDEO_CAPTURE, captureFile(context, "mp4").also { ask.video = it })
-    private fun sound() = Intent(MediaStore.Audio.Media.RECORD_SOUND_ACTION)
-
-    fun intent(context: Context, ask: FileChooserAsk): Intent {
-        // capture：直接開相機／錄影機／錄音機
-        when {
-            ask.captureImage && ask.camera -> return photo(context, ask)
-            ask.captureVideo && ask.camera -> return video(context, ask)
-            ask.captureAudio && ask.mic -> return sound()
+    /** 照片圖庫：Android 13 起用系統相片挑選器，舊版用相簿／檔案選擇器 */
+    private fun library(ask: FileChooserAsk): Intent {
+        val type = when {
+            ask.only("image") -> "image/*"
+            ask.only("video") -> "video/*"
+            else -> null
         }
+        if (Build.VERSION.SDK_INT >= 33) return Intent(MediaStore.ACTION_PICK_IMAGES).apply {
+            type?.let { setType(it) }
+            if (ask.multiple) putExtra(MediaStore.EXTRA_PICK_IMAGES_MAX, MediaStore.getPickImagesMaxLimit())
+        }
+        return Intent(Intent.ACTION_GET_CONTENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            setType(type ?: "image/*")
+            if (type == null) putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "video/*"))
+            if (ask.multiple) putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+        }
+    }
+
+    /** 選擇檔案：系統檔案選擇器（收音訊且有麥克風權限時前面加「錄音」） */
+    private fun files(ask: FileChooserAsk): Intent {
         val types = ask.types
         val pick = Intent(Intent.ACTION_GET_CONTENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*"
             if (types.isNotEmpty() && "*/*" !in types) {
-                // Chromium：只收圖片／影片時加一個不存在的類型，避免系統直接換成相簿選擇器而沒有「檔案」可選
+                // Chromium：只收圖片／影片時加一個不存在的類型，避免系統直接換成相片挑選器而看不到檔案
                 val mimes = if (types.any { it.startsWith("image/") || it.startsWith("video/") }) types + "type/nonexistent" else types
                 putExtra(Intent.EXTRA_MIME_TYPES, mimes.toTypedArray())
             }
-            if (ask.params.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE) putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
-        }
-        val extra = buildList {
-            if (ask.camera && ask.wantsImage) add(photo(context, ask))
-            if (ask.camera && ask.wantsVideo) add(video(context, ask))
-            if (ask.mic && ask.wantsAudio) add(sound())
+            if (ask.multiple) putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
         }
         return Intent(Intent.ACTION_CHOOSER).apply {
             putExtra(Intent.EXTRA_INTENT, pick)
             putExtra(Intent.EXTRA_TITLE, t("選擇檔案"))
-            if (extra.isNotEmpty()) putExtra(Intent.EXTRA_INITIAL_INTENTS, extra.toTypedArray())
+            if (ask.mic && ask.wantsAudio) putExtra(Intent.EXTRA_INITIAL_INTENTS, arrayOf(Intent(MediaStore.Audio.Media.RECORD_SOUND_ACTION)))
         }
+    }
+
+    fun intent(context: Context, ask: FileChooserAsk): Intent = when (ask.source) {
+        FileSource.Library -> library(ask)
+        FileSource.Photo -> cameraIntent(MediaStore.ACTION_IMAGE_CAPTURE, captureFile(context, "jpg").also { ask.photo = it })
+        FileSource.Video -> cameraIntent(MediaStore.ACTION_VIDEO_CAPTURE, captureFile(context, "mp4").also { ask.video = it })
+        FileSource.Files, null -> files(ask)
     }
 
     private fun nonEmpty(context: Context, uri: Uri?): Uri? = uri?.takeIf {

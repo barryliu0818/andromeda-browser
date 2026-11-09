@@ -157,8 +157,9 @@ class MainActivity : ComponentActivity() {
                 vm.fileChooser = null
                 ask.callback.onReceiveValue(com.liquid.browser.browser.FileChooser.result(this@MainActivity, ask, r.resultCode, r.data))
             }
-            LaunchedEffect(vm.fileChooser) {
+            LaunchedEffect(vm.fileChooser, vm.fileChooser?.source) {
                 val ask = vm.fileChooser ?: return@LaunchedEffect
+                if (ask.source == null) return@LaunchedEffect // 來源選單還開著（FileSourceSheet）
                 val intent = com.liquid.browser.browser.FileChooser.intent(this@MainActivity, ask)
                 if (runCatching { files.launch(intent) }.isFailure) {
                     vm.fileChooser = null

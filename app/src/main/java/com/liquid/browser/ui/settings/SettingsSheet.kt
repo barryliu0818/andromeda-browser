@@ -396,7 +396,7 @@ fun SettingsContent(vm: BrowserViewModel, tone: Tone) {
                 list.forEachIndexed { i, ex ->
                     GroupRow(
                         i, list.size, tone, android.net.Uri.parse(ex.origin).host?.removePrefix("www.") ?: ex.origin,
-                        subtitle = "${t(ex.kind.label).replaceFirstChar { it.uppercase() }}・${if (ex.allow) t("允許") else t("封鎖")}・${com.liquid.browser.ui.browser.permissionLifetimeText(ex)}",
+                        subtitle = "${t(ex.kind.label).replaceFirstChar { it.uppercase() }}・${if (!ex.allow) t("封鎖") else if (ex.approx) t("大概位置") else t("允許")}・${com.liquid.browser.ui.browser.permissionLifetimeText(ex)}",
                         leading = { IconTile(ex.kind.icon, if (ex.allow) Color(0xFF34C759) else red) },
                         trailing = { SymButton("close", Palette.Gray, size = 18.dp, label = t("移除")) { com.liquid.browser.browser.SitePermissionStore.reset(ex.origin, ex.kind) } },
                     )

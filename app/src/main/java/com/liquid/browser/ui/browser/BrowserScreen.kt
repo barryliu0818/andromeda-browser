@@ -897,6 +897,7 @@ fun BrowserScreen(vm: BrowserViewModel) {
             SavePasswordBar(vm, haze, menuTone, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = above))
             // 網站要位置／相機／麥克風：Brave 式對話框（一次一個，其他排隊）
             SitePermissionDialog(vm)
+            FileSourceSheet(vm)
             // 密碼列：貼在鍵盤正上方
             PasswordBar(vm, haze, menuTone, menu, Modifier.align(Alignment.BottomCenter).imePadding().padding(start = 16.dp, end = 16.dp, bottom = 8.dp))
 
