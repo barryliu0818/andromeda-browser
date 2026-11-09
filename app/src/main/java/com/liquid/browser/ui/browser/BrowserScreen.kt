@@ -251,10 +251,6 @@ fun BrowserScreen(vm: BrowserViewModel) {
     val sheetShown = sheet.content != null
     // 從選單變形出來的面板不凍結：截圖（擷取整個視窗）那一刻選單還在淡出，會被拍進凍結畫面，
     // 面板拉下來時看到一個卡在畫面上的假選單。這種面板只在繪製階段變形，底下保留即時網頁
-    // 打開用戶中心：要登入才能用的功能（AI 翻譯、安裝擴充）被按下，或設定頁的「用戶中心」（換掉目前的面板）
-    LaunchedEffect(vm.userCenterAsk) {
-        if (vm.userCenterAsk > 0) sheet.show(null, null) { com.liquid.browser.ui.account.UserCenter(vm, menuTone) }
-    }
     LaunchedEffect(sheetShown, tab) {
         if (sheetShown && !tab.isBlank && sheet.from == null) tab.freezeFrame { if (sheet.content != null) frozen = it } else frozen = null
     }

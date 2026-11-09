@@ -110,19 +110,6 @@ fun SettingsContent(vm: BrowserViewModel, tone: Tone) {
     LazyColumn(Modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 48.dp)) {
         item { PageTitle(t("設定"), tone, Modifier.padding(start = 4.dp)) }
 
-        // 帳號：登入、註冊、忘記密碼都在用戶中心（另一個面板）
-        item(key = "account") {
-            Box(Modifier.padding(top = 12.dp)) {
-                GroupRow(
-                    0, 1, tone, t("用戶中心"),
-                    subtitle = com.liquid.browser.browser.Account.email ?: t("登入後才能使用 AI 翻譯與安裝擴充功能"),
-                    leading = { IconTile("account_circle", accent) },
-                    trailing = { Chevron() },
-                    onClick = { vm.openUserCenter() },
-                )
-            }
-        }
-
         // 一般：介面語言、搜尋引擎（下拉選單，不平鋪）
         item { GroupHeader(t("一般"), tone) }
         item(key = "lang") {

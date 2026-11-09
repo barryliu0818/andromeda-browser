@@ -1,7 +1,7 @@
 # 換電腦交接（2026-11-06）
 
 ## 新電腦要手動搬的（不進 git）
-- `local.properties`（sdk.dir、SUPABASE_URL、SUPABASE_ANON_KEY、OREA_CORE_DIR）——用隨身碟或密碼管理器搬，sdk.dir 改成新電腦的路徑
+- `local.properties`（sdk.dir、OREA_CORE_DIR）——用隨身碟或密碼管理器搬，sdk.dir 改成新電腦的路徑
 - `~/.ssh/orea_build`、`orea_build.pub`（編譯伺服器 `ssh -i ~/.ssh/orea_build -p 32117 bygpu@ai.bygpu.com`）
 - release 簽章檔（若有放在 repo 外）
 - `~/.android/debug.keystore`：release 目前用它簽章，換了就不能覆蓋安裝手機上的 Orea（要先移除舊版）
