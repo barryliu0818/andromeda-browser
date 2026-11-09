@@ -185,7 +185,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         if (wanted.all(::granted)) return result(true)
         runtimePermission = RuntimeAsk(wanted.toTypedArray()) { res ->
             val allowed = ok { granted(it) || res[it] == true }
-            if (!allowed) showToast(t("請到系統設定允許使用%1\$s", kinds.joinToString("、") { t(it.label) }))
+            if (!allowed) showToast(t("請到系統設定允許使用%1\$s", kinds.joinToString(t("、")) { t(it.label) }))
             result(allowed)
         }
     }

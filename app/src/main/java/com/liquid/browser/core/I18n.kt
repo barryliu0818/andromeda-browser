@@ -12,10 +12,17 @@ enum class AppLang(val nativeName: String) {
     ZhCN("简体中文"),
     En("English"),
     Ja("日本語"),
+    Ko("한국어"),
+    Ru("Русский"),
+    Es("Español"),
+    Pt("Português"),
+    It("Italiano"),
+    La("Latina"),
+    Hi("हिन्दी"),
 }
 
 /**
- * 介面文字翻譯：程式中的文字以繁體中文撰寫並當作鍵，t() 依目前語言查表（I18nTables.kt），
+ * 介面文字翻譯：程式中的文字以繁體中文撰寫並當作鍵，t() 依目前語言查表（I18nTables.kt、I18n<語言>.kt），
  * 查不到就顯示原文。lang 是 Compose 狀態，切換語言時讀過 t() 的畫面會立即重組更新。
  */
 object I18n {
@@ -23,10 +30,16 @@ object I18n {
         private set
 
     fun apply(pref: AppLang, locale: Locale = Locale.getDefault()) {
-        lang = if (pref != AppLang.System) pref else when {
-            locale.language == "zh" && (locale.script == "Hans" || locale.country in setOf("CN", "SG")) -> AppLang.ZhCN
-            locale.language == "zh" -> AppLang.ZhTW
-            locale.language == "ja" -> AppLang.Ja
+        lang = if (pref != AppLang.System) pref else when (locale.language) {
+            "zh" -> if (locale.script == "Hans" || locale.country in setOf("CN", "SG")) AppLang.ZhCN else AppLang.ZhTW
+            "ja" -> AppLang.Ja
+            "ko" -> AppLang.Ko
+            "ru" -> AppLang.Ru
+            "es" -> AppLang.Es
+            "pt" -> AppLang.Pt
+            "it" -> AppLang.It
+            "la" -> AppLang.La
+            "hi" -> AppLang.Hi
             else -> AppLang.En
         }
     }
@@ -38,6 +51,13 @@ fun t(key: String, vararg args: Any?): String {
         AppLang.ZhCN -> ZH_CN[key]
         AppLang.En -> EN[key]
         AppLang.Ja -> JA[key]
+        AppLang.Ko -> KO[key]
+        AppLang.Ru -> RU[key]
+        AppLang.Es -> ES[key]
+        AppLang.Pt -> PT[key]
+        AppLang.It -> IT[key]
+        AppLang.La -> LA[key]
+        AppLang.Hi -> HI[key]
         else -> null
     } ?: key
     return if (args.isEmpty()) text else runCatching { String.format(text, *args) }.getOrDefault(text)

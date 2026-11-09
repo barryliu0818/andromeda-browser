@@ -98,7 +98,7 @@ fun SitePermissionDialog(vm: BrowserViewModel) {
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Sym(if (opt == lifetime) "radio_button_checked" else "radio_button_unchecked", if (opt == lifetime) accent else Palette.Gray, 22.dp)
-                        Text(t(opt.label), Modifier.padding(start = 10.dp), color = content, fontSize = 15.sp)
+                        Text(t(opt.label).replaceFirstChar { it.uppercase() }, Modifier.padding(start = 10.dp), color = content, fontSize = 15.sp)
                     }
                 }
             }

@@ -42,7 +42,8 @@ enum class TranslateEngine(private val labelKey: String, val endpoint: String, v
 }
 
 /** 翻譯目標語言：各引擎使用的語言代碼與給 AI 的語言描述 */
-enum class TargetLang(val label: String, val google: String, val tencent: String, val prompt: String) {
+/** tencent＝null：騰訊交互翻譯不支援（回 Unsupported-Language），免費翻譯改用 Google */
+enum class TargetLang(val label: String, val google: String, val tencent: String?, val prompt: String) {
     ZhTW("繁體中文", "zh-TW", "zh-TW", "繁體中文（台灣用語）"),
     ZhCN("簡體中文", "zh-CN", "zh", "简体中文"),
     En("English", "en", "en", "English"),
@@ -50,6 +51,10 @@ enum class TargetLang(val label: String, val google: String, val tencent: String
     Ko("한국어", "ko", "ko", "한국어"),
     Es("Español", "es", "es", "español"),
     Ru("Русский", "ru", "ru", "русский язык"),
+    Pt("Português", "pt", "pt", "português"),
+    It("Italiano", "it", "it", "italiano"),
+    La("Latina", "la", null, "lingua Latina"),
+    Hi("हिन्दी", "hi", null, "हिन्दी"),
     Vi("Tiếng Việt", "vi", "vi", "tiếng Việt"),
 }
 
@@ -83,11 +88,11 @@ object Translator {
     suspend fun translate(texts: List<String>, engine: TranslateEngine, key: String, model: String, target: TargetLang, onLine: ((Int, String) -> Unit)? = null): List<String> =
         withContext(Dispatchers.IO) {
             when {
-                engine == TranslateEngine.Tencent -> tencent(texts, target)
+                engine == TranslateEngine.Tencent -> if (target.tencent == null) google(texts, target) else tencent(texts, target)
                 // Google 在中國連不上：失敗時改用騰訊
-                engine == TranslateEngine.Free -> runCatching { google(texts, target) }.getOrElse { tencent(texts, target) }
+                engine == TranslateEngine.Free -> runCatching { google(texts, target) }.getOrElse { if (target.tencent == null) throw it else tencent(texts, target) }
                 // AI 引擎沒填金鑰：用騰訊免費翻譯
-                key.isBlank() -> tencent(texts, target)
+                key.isBlank() -> if (target.tencent == null) google(texts, target) else tencent(texts, target)
                 else -> llm(texts, engine, key, model.ifBlank { engine.model }, target, onLine)
             }
         }
@@ -109,7 +114,7 @@ object Translator {
             .put("type", "plain")
             .put("model_category", "normal")
             .put("source", JSONObject().put("lang", "auto").put("text_list", JSONArray(texts)))
-            .put("target", JSONObject().put("lang", target.tencent))
+            .put("target", JSONObject().put("lang", target.tencent ?: target.google))
         val conn = (URL(TranslateEngine.Tencent.endpoint).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             doOutput = true
