@@ -93,42 +93,6 @@ fun PasswordBar(vm: BrowserViewModel, haze: HazeState, tone: Tone, menu: MenuSta
     }
 }
 
-/** 網站要位置／相機／麥克風：「example.com 要使用你的位置」封鎖／允許（同 Brave 的權限提示） */
-@Composable
-fun SitePermissionBar(vm: BrowserViewModel, haze: HazeState, tone: Tone, modifier: Modifier = Modifier) {
-    val ask = vm.sitePermission?.takeIf { it.tab == vm.current }
-    var shown by remember { mutableStateOf(ask) }
-    if (ask != null) shown = ask
-    AnimatedVisibility(
-        ask != null, modifier,
-        enter = fadeIn(Motion.glass()) + slideInVertically(Motion.glass()) { it / 2 },
-        exit = fadeOut(Motion.exit()) + slideOutVertically(Motion.exit()) { it / 2 },
-    ) {
-        val a = shown ?: return@AnimatedVisibility
-        val accent = accent
-        LiquidGlass(haze, tone, androidx.compose.foundation.shape.RoundedCornerShape(28.dp), systemBlur = false) {
-            Row(Modifier.widthIn(max = 440.dp).padding(start = 14.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Sym(a.kinds.first().icon, accent, 20.dp)
-                Text(
-                    t("%1\$s 要使用你的%2\$s", a.host, a.kinds.joinToString("、") { t(it.label) }),
-                    Modifier.weight(1f, fill = false).padding(start = 8.dp, top = 12.dp, bottom = 12.dp),
-                    color = tone.content, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    t("封鎖"),
-                    Modifier.padding(start = 6.dp).clip(CircleShape).clickable { vm.answerSitePermission(false) }.padding(horizontal = 10.dp, vertical = 10.dp),
-                    color = tone.content.copy(alpha = 0.7f), fontSize = 14.sp,
-                )
-                Text(
-                    t("允許"),
-                    Modifier.clip(CircleShape).clickable { vm.answerSitePermission(true) }.padding(horizontal = 12.dp, vertical = 10.dp),
-                    color = accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-                )
-            }
-        }
-    }
-}
-
 /** 登入後的「要儲存密碼嗎？」：儲存／不要；12 秒沒動作自動收起（無痕分頁不會出現） */
 @Composable
 fun SavePasswordBar(vm: BrowserViewModel, haze: HazeState, tone: Tone, modifier: Modifier = Modifier) {

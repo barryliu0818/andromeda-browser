@@ -125,6 +125,8 @@ class Tab(
         fun onLocalNetworkNeeded(tab: Tab)
         /** 網頁要位置／相機／麥克風（geolocation、getUserMedia） */
         fun onSitePermission(tab: Tab, origin: String, kinds: Set<SiteKind>, result: (Boolean) -> Unit)
+        /** 分頁換到另一個網站（origin 改變） */
+        fun onSiteChanged(tab: Tab) {}
         /** 網頁取消了還沒回覆的權限要求 */
         fun onSitePermissionCancel(tab: Tab)
         /** 網頁的 <input type=file>（含 capture 拍照）：回傳 true 表示會呼叫 callback */
@@ -141,6 +143,8 @@ class Tab(
 
     val webView = WebView(context)
     var url by mutableStateOf("")
+    /** 上一次記錄到的網站（scheme://host:port），換網站時清掉「直到關閉網站」的權限 */
+    private var lastSite: String? = null
     var title by mutableStateOf("")
     var progress by mutableIntStateOf(100)
     var canGoBack by mutableStateOf(false)
@@ -506,8 +510,14 @@ class Tab(
             override fun doUpdateVisitedHistory(view: WebView, u: String, isReload: Boolean) {
                 // Chrome 線上應用程式商店、Firefox 附加元件商店是單頁應用程式：在商店裡點進擴充功能只改網址、不重新載入頁面
                 if (!incognito && u != url && Extensions.packageUrl(u) != null) listener.onExtensionOffer(this@Tab, u)
+                // onPageStarted 已經先改了 url：用另外記住的上一個網站比對
+                val site = SitePermissionStore.originOf(u)
+                val leftSite = site != lastSite
+                lastSite = site
                 url = u
                 shownUrl = u
+                // 離開原本的網站：「直到我關閉這個網站」的權限決定在沒有分頁開著它時忘掉
+                if (leftSite) listener.onSiteChanged(this@Tab)
                 canGoBack = view.canGoBack()
                 canGoForward = view.canGoForward()
             }
@@ -569,7 +579,9 @@ class Tab(
 
             // 定位（navigator.geolocation）：先問使用者這個網站可不可以，再要系統定位權限
             override fun onGeolocationPermissionsShowPrompt(origin: String, callback: android.webkit.GeolocationPermissions.Callback) {
-                listener.onSitePermission(this@Tab, origin, setOf(SiteKind.Location)) { ok -> callback.invoke(origin, ok, false) }
+                // WebView 給的 origin 帶結尾斜線（https://a.com/）：統一成 scheme://host[:port]，跟相機／麥克風共用同一筆網站設定
+                val site = SitePermissionStore.originOf(origin) ?: origin.trimEnd('/')
+                listener.onSitePermission(this@Tab, site, setOf(SiteKind.Location)) { ok -> callback.invoke(origin, ok, false) }
             }
             override fun onGeolocationPermissionsHidePrompt() = listener.onSitePermissionCancel(this@Tab)
 
@@ -585,7 +597,7 @@ class Tab(
                 }.toSet()
                 val drm = res.filter { it == android.webkit.PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID }
                 if (kinds.isEmpty()) return if (drm.isNotEmpty()) request.grant(drm.toTypedArray()) else request.deny()
-                val origin = request.origin.let { "${it.scheme}://${it.authority}" }
+                val origin = SitePermissionStore.originOf(request.origin.toString()) ?: request.origin.toString().trimEnd('/')
                 listener.onSitePermission(this@Tab, origin, kinds) { ok ->
                     if (ok) request.grant(res.filter { it != android.webkit.PermissionRequest.RESOURCE_MIDI_SYSEX }.toTypedArray()) else request.deny()
                 }

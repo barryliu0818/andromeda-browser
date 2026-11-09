@@ -895,9 +895,8 @@ fun BrowserScreen(vm: BrowserViewModel) {
             ExtensionOfferBar(vm, haze, menuTone, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = if (vm.appPrompt?.tab == vm.current) above + 60.dp else above))
             // 登入後「要儲存密碼嗎？」：同一個位置（跟跳轉 App 提示不會同時出現：一個在載入新網頁前、一個在登入送出後）
             SavePasswordBar(vm, haze, menuTone, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = above))
-            // 網站要位置／相機／麥克風（跟上面的提示同時出現時往上讓開）
-            val permAbove = if (vm.appPrompt?.tab == vm.current || vm.pwSave?.tab == vm.current) above + 60.dp else above
-            SitePermissionBar(vm, haze, menuTone, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = permAbove))
+            // 網站要位置／相機／麥克風：Brave 式對話框（一次一個，其他排隊）
+            SitePermissionDialog(vm)
             // 密碼列：貼在鍵盤正上方
             PasswordBar(vm, haze, menuTone, menu, Modifier.align(Alignment.BottomCenter).imePadding().padding(start = 16.dp, end = 16.dp, bottom = 8.dp))
 

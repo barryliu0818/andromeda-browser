@@ -79,6 +79,9 @@ object Engine {
         when {
             !wanted(ctx) -> Unit
             pkg == null && bundled == null -> Unit
+            // 內建核心只有 arm64：x86 模擬器、ChromeOS 等架構不同的裝置載入會閃退，直接用系統 WebView
+            // （x86 模擬器的 SUPPORTED_ABIS 也列 arm64-v8a（ARM 轉譯），但 WebView 用主要架構載入，所以只看第一個）
+            pkg == null && extracted != null && !File(libs(ctx), android.os.Build.SUPPORTED_ABIS.first()).isDirectory -> Unit
             p.getBoolean("trying", false) -> {
                 // 上次換了核心後沒撐過 SAFE_MS 就結束（多半是閃退）：這次先用系統 WebView
                 p.edit().putBoolean("trying", false).commit()

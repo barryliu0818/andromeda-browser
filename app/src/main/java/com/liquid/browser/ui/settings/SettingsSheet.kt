@@ -376,6 +376,34 @@ fun SettingsContent(vm: BrowserViewModel, tone: Tone) {
         }
         item { GroupFooter(t("無痕分頁一律阻擋已知追蹤器、封鎖第三方 Cookie、移除網址追蹤參數。個別網站可在「網站設定」關閉廣告阻擋；網站設定也會顯示安全性檢查結果")) }
 
+        // 網站權限（Brave：設定 → 網站設定 → 位置／相機／麥克風）：預設「先詢問」或「封鎖」，下面列出個別網站的例外
+        item { GroupHeader(t("網站權限"), tone) }
+        val kinds = com.liquid.browser.browser.SiteKind.entries
+        items(kinds.size, key = { "permdef$it" }) { i ->
+            val kind = kinds[i]
+            @Suppress("UNUSED_VARIABLE") val v = com.liquid.browser.browser.SitePermissionStore.version
+            val ask = com.liquid.browser.browser.SitePermissionStore.askByDefault(kind)
+            GroupMenuRow(
+                i, kinds.size, tone, t(kind.label).replaceFirstChar { it.uppercase() }, listOf(t("先詢問"), t("封鎖")), if (ask) 0 else 1,
+                leading = { IconTile(kind.icon, Color(0xFF007AFF)) },
+            ) { pick -> com.liquid.browser.browser.SitePermissionStore.setAskByDefault(kind, pick == 0) }
+        }
+        item(key = "permex") {
+            @Suppress("UNUSED_VARIABLE") val v = com.liquid.browser.browser.SitePermissionStore.version
+            val list = com.liquid.browser.browser.SitePermissionStore.exceptions()
+            if (list.isEmpty()) GroupFooter(t("網站要求使用位置、相機或麥克風時會先詢問你；你的決定會列在這裡，可隨時移除"))
+            else Column(Modifier.padding(top = 8.dp)) {
+                list.forEachIndexed { i, ex ->
+                    GroupRow(
+                        i, list.size, tone, android.net.Uri.parse(ex.origin).host?.removePrefix("www.") ?: ex.origin,
+                        subtitle = "${t(ex.kind.label).replaceFirstChar { it.uppercase() }}・${if (ex.allow) t("允許") else t("封鎖")}・${com.liquid.browser.ui.browser.permissionLifetimeText(ex)}",
+                        leading = { IconTile(ex.kind.icon, if (ex.allow) Color(0xFF34C759) else red) },
+                        trailing = { SymButton("close", Palette.Gray, size = 18.dp, label = t("移除")) { com.liquid.browser.browser.SitePermissionStore.reset(ex.origin, ex.kind) } },
+                    )
+                }
+            }
+        }
+
         // 密碼：要先過指紋／螢幕鎖驗證才展開清單；點一列顯示／隱藏密碼，右側刪除
         item { GroupHeader(t("密碼"), tone) }
         item(key = "passwords") {

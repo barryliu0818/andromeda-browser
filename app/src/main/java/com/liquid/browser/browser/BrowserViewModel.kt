@@ -128,34 +128,51 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
 
     override fun onLocalNetworkNeeded(tab: Tab) { localNetworkRequest = tab }
 
-    // ── 網站權限（位置／相機／麥克風）與檔案上傳 ──
-    /** 底部提示列「xxx 要使用你的位置」：允許／封鎖 */
-    var sitePermission by mutableStateOf<SitePermissionAsk?>(null)
+    // ── 網站權限（位置／相機／麥克風）與檔案上傳：照 Brave（Chromium）──
+    /** 排隊中的權限對話框：一次只顯示一個（目前分頁的第一個），同 Chromium PermissionDialogController */
+    val permissionQueue = mutableStateListOf<SitePermissionAsk>()
+    val sitePermission: SitePermissionAsk? get() = permissionQueue.firstOrNull { it.tab == current }
     /** 要向 Android 要的系統權限（MainActivity 發出要求） */
     var runtimePermission by mutableStateOf<RuntimeAsk?>(null)
     /** 等著開檔案選擇器／相機的 <input type=file>（MainActivity 開啟） */
     var fileChooser by mutableStateOf<FileChooserAsk?>(null)
-    /** 這次開 App 期間使用者對各網站的決定（"origin|種類" → 允許）；無痕分頁不記 */
-    private val siteDecisions = HashMap<String, Boolean>()
 
     private fun granted(p: String) =
         androidx.core.content.ContextCompat.checkSelfPermission(getApplication(), p) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
     override fun onSitePermission(tab: Tab, origin: String, kinds: Set<SiteKind>, result: (Boolean) -> Unit) {
-        if (kinds.any { siteDecisions["$origin|$it"] == false }) return result(false)
-        if (kinds.all { siteDecisions["$origin|$it"] == true }) return requestRuntime(kinds, result)
-        sitePermission?.result?.invoke(false)
-        sitePermission = SitePermissionAsk(tab, origin, kinds, result)
+        val decided = kinds.map { SitePermissionStore.decision(origin, it, tab.incognito) }
+        // 任一種被封鎖（使用者封鎖、預設封鎖、自動封鎖 7 天）：直接拒絕，不再問
+        if (decided.any { it == false }) return result(false)
+        if (decided.all { it == true }) return requestRuntime(kinds, result)
+        permissionQueue += SitePermissionAsk(tab, origin, kinds, result)
     }
 
-    override fun onSitePermissionCancel(tab: Tab) { if (sitePermission?.tab == tab) sitePermission = null }
+    /** 網頁自己取消要求（換頁、關掉通話）：算一次「忽略」 */
+    override fun onSitePermissionCancel(tab: Tab) {
+        permissionQueue.filter { it.tab == tab }.forEach { a ->
+            permissionQueue.remove(a)
+            a.kinds.forEach { SitePermissionStore.noAnswer(a.origin, it, dismissed = false) }
+        }
+    }
 
-    fun answerSitePermission(allow: Boolean) {
+    /** 對話框的「允許」「封鎖」；allow＝null 表示沒選就關掉（返回鍵、點外面）＝dismiss */
+    fun answerSitePermission(allow: Boolean?, lifetime: PermLifetime) {
         val a = sitePermission ?: return
-        sitePermission = null
-        if (!a.tab.incognito) a.kinds.forEach { siteDecisions["${a.origin}|$it"] = allow }
+        permissionQueue.remove(a)
+        if (allow == null) {
+            a.kinds.forEach { SitePermissionStore.noAnswer(a.origin, it, dismissed = true) }
+            return a.result(false)
+        }
+        a.kinds.forEach { SitePermissionStore.set(a.origin, it, allow, lifetime, a.tab.incognito) }
         if (allow) requestRuntime(a.kinds, a.result) else a.result(false)
     }
+
+    /** 「直到我關閉這個網站」：沒有分頁開著那個網站就忘掉 */
+    private fun pruneSitePermissions() = SitePermissionStore.pruneSession(
+        tabs.filter { !it.incognito }.mapNotNull { SitePermissionStore.originOf(it.url) }.toSet(),
+        tabs.filter { it.incognito }.mapNotNull { SitePermissionStore.originOf(it.url) }.toSet(),
+    )
 
     /** 已有系統權限就直接允許；沒有就跟 Android 要（位置只要精確或大概其中一個） */
     private fun requestRuntime(kinds: Set<SiteKind>, result: (Boolean) -> Unit) {
@@ -168,18 +185,31 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         }
     }
 
+    /**
+     * 網頁上傳檔案（Chromium SelectFileDialog）：要拍照／錄影先要相機權限、要錄音先要麥克風權限；
+     * capture 而權限被拒絕＝不給檔案；一般上傳被拒絕則只是選單裡沒有相機。
+     */
     override fun onFileChooser(tab: Tab, callback: android.webkit.ValueCallback<Array<Uri>>, params: WebChromeClient.FileChooserParams): Boolean {
         fileChooser?.callback?.onReceiveValue(null)
         fileChooser = null
         val probe = FileChooserAsk(callback, params, camera = false)
-        val canCapture = probe.wantsImage || probe.wantsVideo
-        // 要放「拍照」就先要相機權限（App 有宣告 CAMERA 時，沒權限開相機 App 會被系統擋下）
-        if (!canCapture || granted(android.Manifest.permission.CAMERA)) {
-            fileChooser = FileChooserAsk(callback, params, camera = canCapture)
-        } else {
-            runtimePermission = RuntimeAsk(arrayOf(android.Manifest.permission.CAMERA)) { res ->
-                fileChooser = FileChooserAsk(callback, params, camera = res[android.Manifest.permission.CAMERA] == true)
-            }
+        val needCam = probe.wantsImage || probe.wantsVideo
+        val needMic = probe.wantsAudio
+        val missing = buildList {
+            if (needCam && !granted(android.Manifest.permission.CAMERA)) add(android.Manifest.permission.CAMERA)
+            if (needMic && !granted(android.Manifest.permission.RECORD_AUDIO)) add(android.Manifest.permission.RECORD_AUDIO)
+        }
+        if (missing.isEmpty()) {
+            fileChooser = FileChooserAsk(callback, params, camera = needCam, mic = needMic)
+            return true
+        }
+        runtimePermission = RuntimeAsk(missing.toTypedArray()) { res ->
+            fun ok(p: String) = granted(p) || res[p] == true
+            val cam = needCam && ok(android.Manifest.permission.CAMERA)
+            val mic = needMic && ok(android.Manifest.permission.RECORD_AUDIO)
+            val capture = probe.captureImage || probe.captureVideo || probe.captureAudio
+            if (capture && !(cam || mic)) callback.onReceiveValue(null)
+            else fileChooser = FileChooserAsk(callback, params, camera = cam, mic = mic)
         }
         return true
     }
@@ -309,6 +339,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     init {
+        SitePermissionStore.init(app)
         // 下載項目裡的影片用內建播放器開（本機檔案，不帶 Referer／Cookie）
         DownloadEngine.videoOpener = { t ->
             t.saved?.let { uri ->
@@ -395,6 +426,8 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         tabs.forEach { if (it.opener == tab) it.opener = null }
         (tab.webView.parent as? ViewGroup)?.removeView(tab.webView)
         tab.webView.destroy()
+        permissionQueue.filter { it.tab == tab }.forEach { permissionQueue.remove(it); it.result(false) }
+        pruneSitePermissions()
         val left = siblings - tab
         // 最後一個無痕分頁關閉時刪除無痕 Profile，Cookie 與儲存資料一併清除
         // WebView.destroy() 是非同步的，立刻刪會丟「in-use profile」而閃退：等它釋放後再刪，期間又開了無痕分頁就不刪
@@ -537,6 +570,12 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     var collapseTarget by mutableStateOf<Float?>(0f)
         private set
     private var settleJob: kotlinx.coroutines.Job? = null
+
+    override fun onSiteChanged(tab: Tab) {
+        // 換網站時，這個分頁還在排隊的權限要求一併取消（同 Chromium：離開頁面＝忽略）
+        permissionQueue.filter { it.tab == tab && it.origin != SitePermissionStore.originOf(tab.url) }.forEach { permissionQueue.remove(it); it.result(false) }
+        pruneSitePermissions()
+    }
 
     override fun onVisited(tab: Tab, url: String, title: String) {
         if (tab == current && url.startsWith("http")) suggestApp(tab, url)

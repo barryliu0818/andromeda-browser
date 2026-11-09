@@ -58,6 +58,7 @@ import com.liquid.browser.ui.IconTile
 import com.liquid.browser.ui.GroupToggle
 import com.liquid.browser.ui.GroupRow
 import com.liquid.browser.ui.GroupHeader
+import com.liquid.browser.ui.GroupMenuRow
 import com.liquid.browser.ui.PageTitle
 import com.liquid.browser.ui.SymButton
 import com.liquid.browser.ui.accent
@@ -272,6 +273,7 @@ fun SiteSettings(tab: Tab, vm: BrowserViewModel, tone: Tone) {
             Text("${tab.textZoom}%", color = tone.content, fontSize = 15.sp, fontWeight = FontWeight.Medium, style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"))
             SymButton("add", tone.content) { tab.setTextSize(TextSteps.firstOrNull { it > tab.textZoom } ?: tab.textZoom) }
         })
+        SitePermissionRows(tab, tone)
         GroupHeader(t("隱私"), tone)
         GroupRow(0, 1, tone, t("清除此網站的 Cookie"), leading = { IconTile("cookie", red) }, destructive = true, onClick = { vm.clearSiteCookies(tab) })
     }
@@ -334,5 +336,42 @@ fun ToggleRow(label: String, checked: Boolean, tone: Tone, onChange: (Boolean) -
     Row(Modifier.fillMaxWidth().clickable { onChange(!checked) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, Modifier.weight(1f), color = tone.content, fontSize = 16.sp)
         com.liquid.browser.ui.IosSwitch(checked, tone, onChange = onChange)
+    }
+}
+
+/** 網站設定裡的「權限」（Brave 的 Page Info → 權限）：位置／相機／麥克風各自 詢問／允許／封鎖，改了就永久記住 */
+@Composable
+private fun SitePermissionRows(tab: Tab, tone: Tone) {
+    val origin = com.liquid.browser.browser.SitePermissionStore.originOf(tab.url) ?: return
+    @Suppress("UNUSED_VARIABLE") val v = com.liquid.browser.browser.SitePermissionStore.version
+    val list = com.liquid.browser.browser.SitePermissionStore.exceptions()
+    val kinds = com.liquid.browser.browser.SiteKind.entries
+    GroupHeader(t("權限"), tone)
+    kinds.forEachIndexed { i, kind ->
+        val ex = list.firstOrNull { it.origin == origin && it.kind == kind }
+        val ask = com.liquid.browser.browser.SitePermissionStore.askByDefault(kind)
+        val selected = when { ex == null -> 0; ex.allow -> 1; else -> 2 }
+        GroupMenuRow(
+            i, kinds.size, tone, t(kind.label).replaceFirstChar { it.uppercase() },
+            listOf(if (ask) t("詢問（預設）") else t("封鎖（預設）"), t("允許"), t("封鎖")), selected,
+            subtitle = ex?.let { permissionLifetimeText(it) },
+            leading = { IconTile(kind.icon, Color(0xFF007AFF)) },
+        ) { pick ->
+            val store = com.liquid.browser.browser.SitePermissionStore
+            when (pick) {
+                0 -> store.reset(origin, kind)
+                else -> store.set(origin, kind, pick == 1, com.liquid.browser.browser.PermLifetime.Forever, tab.incognito)
+            }
+        }
+    }
+}
+
+/** 例外的有效期：關閉網站前／到某日／永遠；自動封鎖另外標示 */
+fun permissionLifetimeText(ex: com.liquid.browser.browser.SiteException): String {
+    val until = ex.until
+    return when {
+        until == 0L -> t("直到關閉這個網站")
+        until == null -> t("永遠")
+        else -> t("到 %1\$s", java.text.SimpleDateFormat("M/d HH:mm", java.util.Locale.getDefault()).format(java.util.Date(until)))
     }
 }

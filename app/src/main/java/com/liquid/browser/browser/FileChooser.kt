@@ -12,8 +12,9 @@ import com.liquid.browser.core.t
 import java.io.File
 
 /**
- * 網頁上傳檔案（<input type=file>）：同 Brave／Chrome，選單裡有「相機」「錄影」和檔案／相簿。
- * 有 capture 屬性（例如只收圖片又加了 capture 的 input）直接開相機。
+ * 網頁上傳檔案（<input type=file>），照 Chromium 的 SelectFileDialog：
+ *  - 有 capture 且只收圖片＝直接開相機；只收影片＝直接錄影；只收音訊＝直接錄音
+ *  - 其他情況開系統檔案選擇器，前面加上「相機」「錄影」「錄音」（依 accept 類型，且有權限才加）
  */
 object FileChooser {
     private fun captureFile(context: Context, ext: String): Uri {
@@ -30,26 +31,39 @@ object FileChooser {
         addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
 
+    private fun photo(context: Context, ask: FileChooserAsk) =
+        cameraIntent(MediaStore.ACTION_IMAGE_CAPTURE, captureFile(context, "jpg").also { ask.photo = it })
+    private fun video(context: Context, ask: FileChooserAsk) =
+        cameraIntent(MediaStore.ACTION_VIDEO_CAPTURE, captureFile(context, "mp4").also { ask.video = it })
+    private fun sound() = Intent(MediaStore.Audio.Media.RECORD_SOUND_ACTION)
+
     fun intent(context: Context, ask: FileChooserAsk): Intent {
-        val cams = buildList {
-            if (ask.camera && ask.wantsImage) add(cameraIntent(MediaStore.ACTION_IMAGE_CAPTURE, captureFile(context, "jpg").also { ask.photo = it }))
-            if (ask.camera && ask.wantsVideo) add(cameraIntent(MediaStore.ACTION_VIDEO_CAPTURE, captureFile(context, "mp4").also { ask.video = it }))
+        // capture：直接開相機／錄影機／錄音機
+        when {
+            ask.captureImage && ask.camera -> return photo(context, ask)
+            ask.captureVideo && ask.camera -> return video(context, ask)
+            ask.captureAudio && ask.mic -> return sound()
         }
-        // capture：直接開相機（只要照片就拍照、只要影片就錄影）
-        if (ask.params.isCaptureEnabled && cams.isNotEmpty()) {
-            return if (ask.wantsImage || cams.size == 1) cams.first() else cams.last()
-        }
+        val types = ask.types
         val pick = Intent(Intent.ACTION_GET_CONTENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
-            val types = ask.params.acceptTypes.flatMap { it.split(',') }.map { it.trim().lowercase() }.filter { it.isNotEmpty() }
-                .map { if (it.startsWith(".")) android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(it.drop(1)) ?: "*/*" else it }
-                .distinct()
-            type = types.singleOrNull() ?: "*/*"
-            if (types.size > 1 && "*/*" !in types) putExtra(Intent.EXTRA_MIME_TYPES, types.toTypedArray())
+            type = "*/*"
+            if (types.isNotEmpty() && "*/*" !in types) {
+                // Chromium：只收圖片／影片時加一個不存在的類型，避免系統直接換成相簿選擇器而沒有「檔案」可選
+                val mimes = if (types.any { it.startsWith("image/") || it.startsWith("video/") }) types + "type/nonexistent" else types
+                putExtra(Intent.EXTRA_MIME_TYPES, mimes.toTypedArray())
+            }
             if (ask.params.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE) putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
         }
-        return Intent.createChooser(pick, t("選擇檔案")).apply {
-            if (cams.isNotEmpty()) putExtra(Intent.EXTRA_INITIAL_INTENTS, cams.toTypedArray())
+        val extra = buildList {
+            if (ask.camera && ask.wantsImage) add(photo(context, ask))
+            if (ask.camera && ask.wantsVideo) add(video(context, ask))
+            if (ask.mic && ask.wantsAudio) add(sound())
+        }
+        return Intent(Intent.ACTION_CHOOSER).apply {
+            putExtra(Intent.EXTRA_INTENT, pick)
+            putExtra(Intent.EXTRA_TITLE, t("選擇檔案"))
+            if (extra.isNotEmpty()) putExtra(Intent.EXTRA_INITIAL_INTENTS, extra.toTypedArray())
         }
     }
 
