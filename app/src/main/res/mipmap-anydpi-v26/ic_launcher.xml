@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- App 圖示：Orea 曙光（向量，任何解析度都清楚）；monochrome 供 Android 13+ 主題圖示 -->
+<!-- App 圖示：Orea 曙光，白色打底（向量，任何解析度都清楚）；monochrome 供 Android 13+ 主題圖示 -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@drawable/ic_launcher_background" />
     <foreground android:drawable="@drawable/ic_launcher_foreground" />

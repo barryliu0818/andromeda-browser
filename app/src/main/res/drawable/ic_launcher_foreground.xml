@@ -1,25 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Orea 圖示前景：地平線上升起的太陽（Orea：曙光）。半圓太陽＋上方一道光弧＋兩條地平線。
+<!-- Orea 圖示前景（白底版）：地平線上升起的太陽（Orea：曙光）。
+     暖橘黃漸層的半圓太陽＋上方一道天藍 → 主色藍的光弧＋兩條主色藍地平線。
      圖形都在 adaptive icon 安全區（中心直徑 66dp）內，各家桌面裁成圓形或方形都完整。 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
     <!-- 光弧 -->
-    <path android:strokeColor="#80FFFFFF" android:strokeWidth="3.2" android:strokeLineCap="round"
-        android:pathData="M31,58A23,23 0 0,1 77,58" />
-    <!-- 太陽（半圓，白 → 暖杏色） -->
+    <path android:strokeWidth="3.2" android:strokeLineCap="round"
+        android:pathData="M31,58A23,23 0 0,1 77,58">
+        <aapt:attr name="android:strokeColor">
+            <gradient android:type="linear" android:startX="31" android:startY="35" android:endX="77" android:endY="58">
+                <item android:offset="0" android:color="#FF6CC6FF" />
+                <item android:offset="1" android:color="#FF3478F6" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- 太陽（半圓，金黃 → 曙光橘） -->
     <path android:pathData="M39,58A15,15 0 0,1 69,58Z">
         <aapt:attr name="android:fillColor">
             <gradient android:type="linear" android:startX="54" android:startY="43" android:endX="54" android:endY="58">
-                <item android:offset="0" android:color="#FFFFFFFF" />
-                <item android:offset="1" android:color="#FFFFE2B8" />
+                <item android:offset="0" android:color="#FFFFC84A" />
+                <item android:offset="1" android:color="#FFFF7A45" />
             </gradient>
         </aapt:attr>
     </path>
     <!-- 地平線 -->
-    <path android:strokeColor="#FFFFFFFF" android:strokeWidth="3.6" android:strokeLineCap="round"
+    <path android:strokeColor="#FF3478F6" android:strokeWidth="3.6" android:strokeLineCap="round"
         android:pathData="M30,63.5H78" />
-    <path android:strokeColor="#99FFFFFF" android:strokeWidth="3.2" android:strokeLineCap="round"
+    <path android:strokeColor="#8C3478F6" android:strokeWidth="3.2" android:strokeLineCap="round"
         android:pathData="M40,71H68" />
 </vector>

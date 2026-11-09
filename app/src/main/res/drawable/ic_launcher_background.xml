@@ -1,23 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Orea 圖示背景：天藍 → App 主色藍 → 深藍的斜向漸層，左上一團柔光（像晨光照進來） -->
+<!-- Orea 圖示背景：白色打底，下方帶一點點冷灰（不會在白色桌布上糊成一片） -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
     <path android:pathData="M0,0h108v108h-108z">
         <aapt:attr name="android:fillColor">
-            <gradient android:type="linear" android:startX="20" android:startY="0" android:endX="88" android:endY="108">
-                <item android:offset="0" android:color="#FF6CC6FF" />
-                <item android:offset="0.5" android:color="#FF3478F6" />
-                <item android:offset="1" android:color="#FF1F3FBF" />
-            </gradient>
-        </aapt:attr>
-    </path>
-    <path android:pathData="M0,0h108v108h-108z">
-        <aapt:attr name="android:fillColor">
-            <gradient android:type="radial" android:centerX="54" android:centerY="58" android:gradientRadius="40">
-                <item android:offset="0" android:color="#40FFE9C7" />
-                <item android:offset="1" android:color="#00FFE9C7" />
+            <gradient android:type="linear" android:startX="54" android:startY="0" android:endX="54" android:endY="108">
+                <item android:offset="0" android:color="#FFFFFFFF" />
+                <item android:offset="1" android:color="#FFEEF2F8" />
             </gradient>
         </aapt:attr>
     </path>
