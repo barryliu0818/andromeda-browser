@@ -95,6 +95,9 @@ class PlayerController(
         player = ExoPlayer.Builder(context, androidx.media3.exoplayer.DefaultRenderersFactory(context).setEnableDecoderFallback(true))
             .setMediaSourceFactory(DefaultMediaSourceFactory(context).setDataSourceFactory(DefaultDataSource.Factory(context, http)))
             .setVideoChangeFrameRateStrategy(C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_ONLY_IF_SEAMLESS)
+            // 音訊焦點：來電、其他 App 開始播放聲音時自動暫停；拔掉耳機、藍牙斷線時暫停，不會突然從喇叭放出來
+            .setAudioAttributes(androidx.media3.common.AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true)
+            .setHandleAudioBecomingNoisy(true)
             .build()
         val path = request.url.substringBefore('?').lowercase()
         val mime = when {

@@ -23,8 +23,8 @@
   // 與原生玻璃一致的樣式：模糊＋飽和度＋半透明深色＋上緣亮邊
   var css =
     '.lq-layer{position:absolute;z-index:2147483646;pointer-events:none;overflow:hidden}' +
-    '.lq-glass{position:absolute;color:#fff;font:600 15px/1.2 system-ui,sans-serif;background:rgba(20,20,22,.32);' +
-    '-webkit-backdrop-filter:blur(22px) saturate(1.4);backdrop-filter:blur(22px) saturate(1.4);' +
+    // 2x 提示、拖動進度的泡泡會在播放中的影片上停留好幾秒：不做即時模糊（每幀重新模糊影片很耗 GPU），改用深一點的半透明底
+    '.lq-glass{position:absolute;color:#fff;font:600 15px/1.2 system-ui,sans-serif;background:rgba(20,20,22,.58);' +
     'box-shadow:inset 0 1px 0 rgba(255,255,255,.35),inset 0 -1px 0 rgba(0,0,0,.2),0 6px 24px rgba(0,0,0,.18);' +
     'opacity:0;transition:opacity .2s,transform .28s cubic-bezier(.32,.72,0,1);pointer-events:none;white-space:nowrap}' +
     '.lq-pill{left:50%;top:max(16px,11%);padding:7px 16px;border-radius:999px;transform:translate(-50%,-140%)}' +
@@ -42,7 +42,7 @@
     '.lq-ripple.l .lq-arrows{transform:scaleX(-1)}' +
     '.lq-sec{position:relative;margin-top:6px;font-variant-numeric:tabular-nums}' +
     // 全螢幕控制層（取代網站自己的控制列）：上下漸層遮罩讓文字在任何畫面上都清楚；
-    // 只有小元件用毛玻璃（整片模糊影片很耗 GPU，叫出控制列時會卡）；觸控目標都 ≥ 44px
+    // 一直顯示的元件不做即時模糊（影片每幀都在變，模糊要每幀重算），只有點開才出現的倍速選單、下載確認用毛玻璃；觸控目標都 ≥ 44px
     '.lq-ui{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .18s ease-out}' +
     '.lq-ui.on{opacity:1}.lq-ui.on .lq-hit{pointer-events:auto}' +
     '.lq-top,.lq-bottom{position:absolute;left:0;right:0;display:flex;align-items:center;transition:transform .22s cubic-bezier(.32,.72,0,1)}' +
@@ -50,7 +50,7 @@
     '.lq-bottom{bottom:0;flex-direction:column;align-items:stretch;padding:40px 14px max(12px,3%);background:linear-gradient(rgba(0,0,0,0),rgba(0,0,0,.6));transform:translateY(10px)}' +
     '.lq-ui.on .lq-top,.lq-ui.on .lq-bottom{transform:none}' +
     '.lq-round{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:none;' +
-    'background:rgba(255,255,255,.16);-webkit-backdrop-filter:blur(16px) saturate(1.5);backdrop-filter:blur(16px) saturate(1.5);' +
+    'background:rgba(28,28,30,.5);' + // 控制列顯示期間一直在影片上：不做即時模糊
     'box-shadow:inset 0 1px 0 rgba(255,255,255,.3);transition:transform .15s,background .15s}' +
     '.lq-round:active{transform:scale(.92);background:rgba(255,255,255,.28)}.lq-round svg{width:22px;height:22px;fill:#fff}' +
     // 右上角倍速下拉：膠囊按鈕＋往下展開的毛玻璃選單（最快 5 倍）
@@ -133,7 +133,26 @@
     requestAnimationFrame(frame);
   }
 
+  // 手勢與控制層只在全螢幕時有作用：attach 先只記下影片，第一次全螢幕時才建立整套介面與監聽
+  // （以前每部影片一出現就建好——短影音、自動播放的廣告與預覽小圖都各建一套，還各掛一組 window 監聽與定時器）
+  var videos = [];
   function attach(video) {
+    if (video.__lqSeen) return;
+    video.__lqSeen = true;
+    videos.push(video);
+  }
+  function onFullscreen() {
+    var f = document.fullscreenElement || document.webkitFullscreenElement;
+    videos = videos.filter(function (v) { return v.isConnected; });
+    if (!f) return;
+    videos.forEach(function (v) {
+      if (!v.__lq && (f === v || f.contains(v))) { build(v); v.__lqShow && v.__lqShow(); }
+    });
+  }
+  document.addEventListener('fullscreenchange', onFullscreen);
+  document.addEventListener('webkitfullscreenchange', onFullscreen);
+
+  function build(video) {
     if (video.__lq) return;
     video.__lq = true;
     injectStyle(document);
@@ -185,13 +204,24 @@
       ui.addEventListener(t, function (e) { if (e.target.closest && e.target.closest('.lq-hit,.lq-confirm.open')) e.stopPropagation(); });
     });
     var barTimer = null, barTick = null, seeking = false;
+    // 控制列顯示時每 250ms 更新：圖示、倍速只在狀態改變時重建（以前每次都重寫 innerHTML、重找全部倍速選項）
+    var shownPaused = null, shownRate = null, shownDl = null;
+    var ppEl = $('.lq-pp'), dlEl = $('.lq-dl'), centerEl = $('.lq-center'), timeEl = $('.lq-time'), speedEl = $('.lq-speed');
+    var optEls = Array.prototype.slice.call(ui.querySelectorAll('.lq-opt'));
     function refreshBar() {
-      $('.lq-pp').innerHTML = H(video.paused ? ICON_PLAY : ICON_PAUSE);
-      $('.lq-dl').style.display = canDownload() ? '' : 'none';
-      $('.lq-center').classList.toggle('show', video.paused);
-      $('.lq-time').textContent = fmt(video.currentTime) + ' / ' + fmt(video.duration);
-      $('.lq-speed').innerHTML = H(video.playbackRate + 'x' + ICON_DOWN);
-      Array.prototype.forEach.call(ui.querySelectorAll('.lq-opt'), function (o) { o.classList.toggle('sel', +o.dataset.r === video.playbackRate); });
+      if (video.paused !== shownPaused) {
+        shownPaused = video.paused;
+        ppEl.innerHTML = H(shownPaused ? ICON_PLAY : ICON_PAUSE);
+        centerEl.classList.toggle('show', shownPaused);
+      }
+      var dl = canDownload();
+      if (dl !== shownDl) { shownDl = dl; dlEl.style.display = dl ? '' : 'none'; }
+      timeEl.textContent = fmt(video.currentTime) + ' / ' + fmt(video.duration);
+      if (video.playbackRate !== shownRate) {
+        shownRate = video.playbackRate;
+        speedEl.innerHTML = H(shownRate + 'x' + ICON_DOWN);
+        optEls.forEach(function (o) { o.classList.toggle('sel', +o.dataset.r === shownRate); });
+      }
       var d = video.duration || 0;
       if (d && video.buffered && video.buffered.length) $('.lq-track u').style.width = (video.buffered.end(video.buffered.length - 1) / d * 100) + '%';
       if (!seeking) $('.lq-track b').style.width = (d ? video.currentTime / d * 100 : 0) + '%';
@@ -277,8 +307,18 @@
       var fs = document.fullscreenElement || document.webkitFullscreenElement;
       return fs && fs !== video && fs.contains(video) ? fs : document.body;
     }
+    var placeTimer = 0;
     function place() {
-      if (!video.isConnected) { layer.remove(); return; }
+      if (!video.isConnected) { layer.remove(); clearInterval(placeTimer); placeTimer = 0; return; }
+      // 不是全螢幕：手勢與控制層都不作用，藏起來就好，不必跟著影片位置計算
+      var fs = document.fullscreenElement || document.webkitFullscreenElement;
+      if (!fs || !(fs === video || fs.contains(video))) {
+        layer.style.display = 'none';
+        clearInterval(placeTimer); placeTimer = 0;
+        return;
+      }
+      // 版面被頁面腳本改動時的保險：只在全螢幕期間每秒對一次位置
+      if (!placeTimer) placeTimer = setInterval(place, 1000);
       var h = host();
       if (layer.parentNode !== h) h.appendChild(layer);
       var r = video.getBoundingClientRect();
@@ -300,7 +340,8 @@
     window.addEventListener('resize', place);
     document.addEventListener('fullscreenchange', function () { setTimeout(place, 50); });
     // 全螢幕時隱藏網站自己的控制列由 video_detect.js 的 hideSiteControls 統一處理（兩邊都做時，這邊會把對方藏起來的狀態當原狀記下，離開後控制列一直不見）
-    setInterval(place, 1000); // 版面被頁面腳本改動時的保險
+    // 第一次全螢幕時才建立：當下這次 fullscreenchange 已經在派送，上面新加的監聽收不到，由 onFullscreen 呼叫這裡補做
+    video.__lqShow = function () { setTimeout(place, 50); setTimeout(showBar, 80); };
 
     var pendingTap = null, lastTapAt = 0, lastZone = 0, accumulating = false, accumulated = 0, rippleTimer = null;
     var prevRate = 1;

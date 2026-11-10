@@ -5,7 +5,6 @@ import com.liquid.browser.core.t
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.media.AudioManager
-import android.view.TextureView
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.annotation.OptIn
@@ -108,7 +107,7 @@ private val Speeds = listOf(0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 3f, 4f, 5f)
 private val Tabular = TextStyle(fontFeatureSettings = "tnum")
 
 /**
- * 原生播放器畫面：影片（TextureView，讓液態玻璃控制項能取樣影片畫面）＋手勢層＋手勢回饋＋玻璃控制列。
+ * 原生播放器畫面：影片（SurfaceView）＋手勢層＋手勢回饋＋玻璃控制列。
  * 控制列 3 秒無操作自動隱藏；全螢幕切換時轉為橫向並隱藏系統列；子母畫面時只顯示影片。
  */
 @OptIn(UnstableApi::class)
@@ -125,10 +124,12 @@ fun PlayerScreen(c: PlayerController, inPip: Boolean, onVideoBounds: (android.gr
     var controls by remember { mutableStateOf(true) }
     var touchedAt by remember { mutableLongStateOf(0L) }
 
-    // 播放位置每幀更新，但只在繪製階段與「秒」改變時讀取，避免每幀重組
+    // 播放位置每幀更新，但只在繪製階段與「秒」改變時讀取，避免每幀重組。
+    // 控制列收起時沒有東西顯示位置（拖動調進度由手勢自己向播放器要位置）：不讀
     val position = remember { mutableLongStateOf(0L) }
     val buffered = remember { mutableLongStateOf(0L) }
-    LaunchedEffect(c) {
+    LaunchedEffect(c, controls, inPip) {
+        if (!controls || inPip) return@LaunchedEffect
         while (true) {
             withFrameMillis { }
             position.longValue = c.player.currentPosition
@@ -159,6 +160,12 @@ fun PlayerScreen(c: PlayerController, inPip: Boolean, onVideoBounds: (android.gr
             activity?.let(::backToPortrait)
             activity?.window?.attributes = activity?.window?.attributes?.apply { screenBrightness = -1f }
         }
+    }
+
+    // 播放中保持螢幕開啟（以前看影片看到一半會依系統設定自動關螢幕）；暫停、關掉播放器後交還系統
+    DisposableEffect(c.isPlaying) {
+        view.keepScreenOn = c.isPlaying
+        onDispose { view.keepScreenOn = false }
     }
 
     // 3 秒無操作自動隱藏控制列
@@ -234,10 +241,12 @@ fun PlayerScreen(c: PlayerController, inPip: Boolean, onVideoBounds: (android.gr
                             translationY = lerp(from.center.y - full.center.y, 0f, p)
                         },
                 ) {
+                    // SurfaceView：影片直接交給系統合成，不像 TextureView 每幀多複製一次到 App 的畫面（較省電、支援 HDR、子母畫面更順）。
+                    // 控制列的玻璃本來就不即時模糊影片，不需要從 App 畫面取樣影片
                     AndroidView(
-                        factory = { ctx -> TextureView(ctx).also { c.player.setVideoTextureView(it) } },
+                        factory = { ctx -> android.view.SurfaceView(ctx).also { c.player.setVideoSurfaceView(it) } },
                         modifier = Modifier.fillMaxSize(),
-                        onRelease = { c.player.clearVideoTextureView(it) },
+                        onRelease = { c.player.clearVideoSurfaceView(it) },
                     )
                 }
             }

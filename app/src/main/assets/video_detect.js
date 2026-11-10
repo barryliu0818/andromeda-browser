@@ -107,28 +107,11 @@
 })();
 
 // 影片偵測：用 MutationObserver 找出頁面上的 <video>。
-//  - 拿得到實際網址（http/https 的 mp4、m3u8、mpd 等）：在影片右上角顯示液態玻璃按鈕「用原生播放器播放」，
-//    點擊後把網址、標題與影片位置交給 App（Media3 播放器）；旁邊的圓形「下載」鈕直接交給 App 的下載引擎。
-//  - 來源是 blob: 或 MediaSource（拿不到網址）：改掛 JS 手勢層（gesture_layer.js），手勢與原生端一致。
+// 每部有來源的影片交給 JS 手勢層（gesture_layer.js）記下；第一次全螢幕時才建立手勢與控制層。
+// （以前在影片右上角疊「用原生播放器播放」與下載鈕，已停用、程式碼也拿掉了：一律用網頁自己的播放器，下載用 App 底部的「下載影片」）
 (function () {
   if (window.__liquidDetect) return;
   window.__liquidDetect = true;
-  // 網站要求 Trusted Types（例如 YouTube 的 Chromium 版）時 innerHTML 只收 TrustedHTML：用本腳本自己的政策包一層
-  // （只用在腳本自己組的固定介面，不放網頁內容；網站本身的保護不受影響）
-  var TT = null;
-  try { if (window.trustedTypes && trustedTypes.createPolicy) TT = trustedTypes.createPolicy('lq-detect', { createHTML: function (s) { return s; } }); } catch (e) {}
-  function H(s) { return TT ? TT.createHTML(s) : s; }
-
-  var BTN_CSS =
-    '.lq-native{position:absolute;z-index:2147483647;display:flex;align-items:center;gap:6px;padding:7px 12px 7px 10px;' +
-    'border-radius:999px;color:#fff;font:600 13px/1 system-ui,sans-serif;background:rgba(20,20,22,.32);border:0;' +
-    '-webkit-backdrop-filter:blur(20px) saturate(1.4);backdrop-filter:blur(20px) saturate(1.4);' +
-    'box-shadow:inset 0 1px 0 rgba(255,255,255,.35),inset 0 -1px 0 rgba(0,0,0,.2),0 6px 20px rgba(0,0,0,.2);' +
-    'transition:transform .25s cubic-bezier(.32,.72,0,1),opacity .2s;-webkit-tap-highlight-color:transparent}' +
-    '.lq-native:active{transform:scale(1.05)}' +
-    '.lq-native svg{width:16px;height:16px;fill:#fff}' +
-    '.lq-native.lq-dl{padding:7px;gap:0}';
-
   function sourceOf(v) {
     var s = v.currentSrc || v.src || '';
     if (!s) {
@@ -138,77 +121,8 @@
     return s;
   }
 
-  function post(msg) {
-    try { if (window.LiquidBridge) LiquidBridge.postMessage(JSON.stringify(msg)); } catch (e) {}
-  }
-
-  function addNativeButton(v, src) {
-    if (v.__lqBtn) { v.__lqBtn.__src = src; return; }
-    if (!document.querySelector('style[data-lq-native]')) {
-      var st = document.createElement('style');
-      st.setAttribute('data-lq-native', '');
-      st.textContent = BTN_CSS;
-      (document.head || document.documentElement).appendChild(st);
-    }
-    var b = document.createElement('button');
-    b.className = 'lq-native';
-    b.__src = src;
-    b.innerHTML = H('<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>用原生播放器播放');
-    b.addEventListener('click', function (e) {
-      e.preventDefault(); e.stopPropagation();
-      var r = v.getBoundingClientRect();
-      try { v.pause(); } catch (x) {}
-      post({
-        type: 'native',
-        src: b.__src,
-        title: document.title || '',
-        poster: v.poster || '',
-        time: v.currentTime || 0,
-        // 影片在畫面中的位置（CSS px），App 用來做放大轉場；iframe 內的影片不提供
-        rect: window === window.top ? [r.left, r.top, r.width, r.height] : null,
-        dpr: window.devicePixelRatio || 1
-      });
-    }, true);
-    v.__lqBtn = b;
-
-    // 下載鈕：沒有下載按鈕的影片網站也能一鍵下載
-    var d = document.createElement('button');
-    d.className = 'lq-native lq-dl';
-    d.setAttribute('aria-label', '下載影片');
-    d.innerHTML = H('<svg viewBox="0 0 24 24"><path d="M11 4h2v9.2l3.6-3.6 1.4 1.4-6 6-6-6 1.4-1.4 3.6 3.6zM5 18h14v2H5z"/></svg>');
-    d.addEventListener('click', function (e) {
-      e.preventDefault(); e.stopPropagation();
-      post({ type: 'download', src: b.__src, title: document.title || '' });
-    }, true);
-
-    function place() {
-      if (!v.isConnected) { b.remove(); d.remove(); return; }
-      var fs = document.fullscreenElement || document.webkitFullscreenElement;
-      var host = fs && fs !== v && fs.contains(v) ? fs : document.body;
-      if (b.parentNode !== host) host.appendChild(b);
-      if (d.parentNode !== host) host.appendChild(d);
-      var r = v.getBoundingClientRect();
-      var base = host === document.body ? { left: -window.scrollX, top: -window.scrollY } : host.getBoundingClientRect();
-      b.style.display = r.width > 120 && r.height > 80 ? 'flex' : 'none';
-      b.style.left = (r.right - base.left - b.offsetWidth - 10) + 'px';
-      b.style.top = (r.top - base.top + 10) + 'px';
-      d.style.display = b.style.display;
-      d.style.left = (parseFloat(b.style.left) - d.offsetWidth - 8) + 'px';
-      d.style.top = b.style.top;
-    }
-    place();
-    if (window.ResizeObserver) new ResizeObserver(place).observe(v);
-    window.addEventListener('scroll', place, { passive: true });
-    window.addEventListener('resize', place);
-    document.addEventListener('fullscreenchange', function () { setTimeout(place, 50); });
-    setInterval(place, 1000);
-  }
-
   function check(v) {
-    var src = sourceOf(v);
-    // 不再在影片上疊「原生播放器」與下載按鈕：一律用網頁自己的播放器；下載用 App 底部的「下載影片」
-    // 手勢層（只在全螢幕時啟用手勢與 App 的控制列）掛在所有影片上
-    if (src && window.__liquidGestures) window.__liquidGestures.attach(v);
+    if (sourceOf(v) && window.__liquidGestures) window.__liquidGestures.attach(v);
   }
 
   function watch(v) {
