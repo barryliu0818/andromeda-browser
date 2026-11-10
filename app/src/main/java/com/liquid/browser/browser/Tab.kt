@@ -131,6 +131,8 @@ class Tab(
         fun onSiteChanged(tab: Tab) {}
         /** 開始載入新的網頁（舊網頁還沒翻完的翻譯要取消） */
         fun onPageStart(tab: Tab) {}
+        /** 這個分頁有沒有正在發出聲音的影片／音樂改變了（音訊焦點用） */
+        fun onAudible(tab: Tab) {}
         /** 網頁取消了還沒回覆的權限要求 */
         fun onSitePermissionCancel(tab: Tab)
         /** 網頁的 <input type=file>（含 capture 拍照）：回傳 true 表示會呼叫 callback */
@@ -515,6 +517,7 @@ class Tab(
                 if (legacyInject && listener.shields()) view.evaluateJavascript(Shields.fingerprintJs, null)
                 if (legacyInject) view.evaluateJavascript(geoApproxScript(SitePermissionStore.approxOrigins(incognito)), null)
                 listener.onPageStart(this@Tab)
+                clearAudio()
                 translated = false
                 trTarget = null
                 trSent = 0
@@ -734,7 +737,7 @@ class Tab(
             legacyInject = true
         }
         if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
-            WebViewCompat.addWebMessageListener(webView, "LiquidBridge", setOf("*")) { _, message, source, mainFrame, _ ->
+            WebViewCompat.addWebMessageListener(webView, "LiquidBridge", setOf("*")) { _, message, source, mainFrame, reply ->
                 val json = runCatching { JSONObject(message.data ?: return@addWebMessageListener) }.getOrNull() ?: return@addWebMessageListener
                 val type = json.optString("type")
                 // 密碼訊息：只收最上層頁面、https、而且跟目前顯示的網站同一個來源（iframe 或別的網站送來的一律不理）
@@ -754,6 +757,8 @@ class Tab(
                     return@addWebMessageListener
                 }
                 when (type) {
+                    "audio_on" -> { audioFrames += reply; listener.onAudible(this) }
+                    "audio_off" -> { audioFrames -= reply; listener.onAudible(this) }
                     "haptic" -> webView.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                     "nopull" -> { pullArmed = false; pull = 0f }
                     "vtap" -> videoTapAt = android.os.SystemClock.uptimeMillis()
@@ -1117,6 +1122,35 @@ class Tab(
         pageShots.clear()
         media.clear()
         translated = false
+        clearAudio()
+    }
+
+    // ── 音訊焦點：哪些框架正在發出聲音（video_detect.js 回報 audio_on／audio_off），App 用它們的回覆通道下指令 ──
+    private val audioFrames = mutableSetOf<androidx.webkit.JavaScriptReplyProxy>()
+    /** 因為失去音訊焦點而暫停的框架（拿回焦點時恢復播放） */
+    private var pausedFrames = emptyList<androidx.webkit.JavaScriptReplyProxy>()
+
+    /** 這個分頁正在發出聲音 */
+    val audible: Boolean get() = audioFrames.isNotEmpty()
+
+    /** 暫停這個分頁所有有聲音的影片／音樂；resume＝之後拿回焦點時要恢復 */
+    fun pauseMedia(resume: Boolean) {
+        val frames = audioFrames.toList()
+        pausedFrames = if (resume) frames else emptyList()
+        frames.forEach { runCatching { it.postMessage("pause") } }
+    }
+
+    fun resumeMedia() {
+        pausedFrames.forEach { runCatching { it.postMessage("resume") } }
+        pausedFrames = emptyList()
+    }
+
+    /** 換頁、關分頁：舊網頁的框架都不在了 */
+    private fun clearAudio() {
+        if (audioFrames.isEmpty() && pausedFrames.isEmpty()) return
+        audioFrames.clear()
+        pausedFrames = emptyList()
+        listener.onAudible(this)
     }
 
     /** 記憶體吃緊：離開頁面時留下的截圖（邊緣滑動返回用）清掉 */

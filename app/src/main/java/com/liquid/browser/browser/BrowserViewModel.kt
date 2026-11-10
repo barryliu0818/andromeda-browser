@@ -1062,6 +1062,78 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
 
     override fun onPageStart(tab: Tab) = cancelTranslations(tab)
 
+    // ── 網頁影片／音樂的音訊焦點（照 Chrome／Brave 的 AudioFocusDelegate）──
+    // WebView 本身不向系統要音訊焦點：網頁有聲音時由這裡要；其他 App 拿走焦點（放音樂、導航語音、來電）時暫停網頁，
+    // 短暫被拿走的拿回來後恢復播放；可以小聲的（導航提示）交給系統自動降低音量。拔掉耳機、藍牙斷線時暫停
+    private val audioManager = app.getSystemService(android.media.AudioManager::class.java)
+    private var focusRequest: android.media.AudioFocusRequest? = null
+    /** 短暫失去焦點時暫停的分頁：拿回焦點時恢復 */
+    private var pausedForFocus = emptyList<Tab>()
+
+    private val noisyReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: android.content.Context, i: Intent) {
+            pausedForFocus = emptyList()
+            tabs.filter { it.audible }.forEach { it.pauseMedia(resume = false) }
+        }
+    }
+
+    private val focusListener = android.media.AudioManager.OnAudioFocusChangeListener { change ->
+        when (change) {
+            android.media.AudioManager.AUDIOFOCUS_LOSS -> {
+                pausedForFocus = emptyList()
+                tabs.filter { it.audible }.forEach { it.pauseMedia(resume = false) }
+                releaseAudioFocus()
+            }
+            android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                pausedForFocus = tabs.filter { it.audible }
+                pausedForFocus.forEach { it.pauseMedia(resume = true) }
+            }
+            android.media.AudioManager.AUDIOFOCUS_GAIN -> {
+                pausedForFocus.forEach { if (it in tabs) it.resumeMedia() }
+                pausedForFocus = emptyList()
+            }
+            // AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK：系統自動降低音量（setWillPauseWhenDucked(false)）
+        }
+    }
+
+    override fun onAudible(tab: Tab) {
+        val any = tabs.any { it.audible }
+        when {
+            any && focusRequest == null -> {
+                val req = android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN)
+                    .setAudioAttributes(
+                        android.media.AudioAttributes.Builder()
+                            .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MOVIE)
+                            .build(),
+                    )
+                    .setWillPauseWhenDucked(false)
+                    .setOnAudioFocusChangeListener(focusListener, android.os.Handler(android.os.Looper.getMainLooper()))
+                    .build()
+                if (audioManager.requestAudioFocus(req) == android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+                    focusRequest = req
+                    androidx.core.content.ContextCompat.registerReceiver(
+                        getApplication(), noisyReceiver,
+                        android.content.IntentFilter(android.media.AudioManager.ACTION_AUDIO_BECOMING_NOISY),
+                        androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED,
+                    )
+                } else {
+                    // 要不到（通話中）：跟 Chrome 一樣不讓網頁出聲
+                    tabs.filter { it.audible }.forEach { it.pauseMedia(resume = false) }
+                }
+            }
+            // 都停了：交還焦點（短暫被拿走、等著恢復的時候不交還，才收得到 GAIN）
+            !any && focusRequest != null && pausedForFocus.isEmpty() -> releaseAudioFocus()
+        }
+    }
+
+    private fun releaseAudioFocus() {
+        val req = focusRequest ?: return
+        focusRequest = null
+        audioManager.abandonAudioFocusRequest(req)
+        runCatching { getApplication<Application>().unregisterReceiver(noisyReceiver) }
+    }
+
     /**
      * AI 翻譯合併送出：網頁一次丟來好幾批（每批最多 30 段），等 80ms 收齊後合併後拆成小請求（第一個約 250 字、其餘約 500 字，最多 8 個同時跑），
      * 重複的文字只送一次。系統提示詞不用每 30 段重送一遍，請求數也少很多。只在主執行緒呼叫
@@ -1220,6 +1292,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     suspend fun matchBookmarks(q: String): List<Bookmark> = db.bookmarks().search(q)
 
     override fun onCleared() {
+        releaseAudioFocus()
         DownloadEngine.videoOpener = null
         player?.release()
         tabs.forEach { it.destroyWebView() }

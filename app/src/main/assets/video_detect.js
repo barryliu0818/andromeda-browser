@@ -216,3 +216,37 @@
   }, { passive: true, capture: true });
   addEventListener('touchmove', function (e) { if (e.defaultPrevented) nopull(); }, { passive: true });
 })();
+
+// 音訊焦點（照 Chrome／Brave）：網頁裡有聲音的影片、音樂開始播放或停止時通知 App，App 向系統要求或交還音訊焦點；
+// 其他 App 要播聲音、來電、拔掉耳機時，App 用 LiquidBridge 回傳 pause（之後 resume）給這個框架。
+// 靜音或音量 0 的（自動播放的廣告、預覽）不算。每個框架各自回報，App 依框架記錄。
+(function () {
+  if (window.__lqAudio || !window.LiquidBridge) return;
+  window.__lqAudio = true;
+  var on = false, pausedByApp = [];
+  function audible(m) { return !m.paused && !m.ended && !m.muted && m.volume > 0; }
+  function media() { return Array.prototype.slice.call(document.querySelectorAll('video,audio')); }
+  function post(o) { try { LiquidBridge.postMessage(JSON.stringify(o)); } catch (e) {} }
+  function update() {
+    var now = media().some(audible);
+    if (now === on) return;
+    on = now;
+    post({ type: now ? 'audio_on' : 'audio_off' });
+  }
+  // 媒體事件不冒泡，在 document 的捕獲階段聽得到
+  ['playing', 'pause', 'ended', 'volumechange', 'emptied'].forEach(function (t) {
+    document.addEventListener(t, function () { setTimeout(update, 0); }, true);
+  });
+  window.addEventListener('pagehide', function () { if (on) { on = false; post({ type: 'audio_off' }); } });
+  if (LiquidBridge.addEventListener) LiquidBridge.addEventListener('message', function (e) {
+    if (e.data === 'pause') {
+      pausedByApp = media().filter(audible);
+      pausedByApp.forEach(function (m) { try { m.pause(); } catch (x) {} });
+    } else if (e.data === 'resume') {
+      pausedByApp.forEach(function (m) { try { var p = m.play(); if (p && p.catch) p.catch(function () {}); } catch (x) {} });
+      pausedByApp = [];
+    } else if (e.data === 'forget') {
+      pausedByApp = [];
+    }
+  });
+})();
