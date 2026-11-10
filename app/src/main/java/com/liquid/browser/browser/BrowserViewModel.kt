@@ -122,13 +122,26 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     }
 
     /** 注入網頁的影片偵測＋手勢層腳本（assets），第一次使用時讀取並快取 */
-    private val videoScript: String by lazy {
+    private val videoScript: String by lazy { asset("gesture_layer.js", "video_detect.js", "pw_autofill.js") }
+
+    /** YouTube 字幕翻譯腳本：只注入 YouTube 的頁面（以前每個網站的每個 iframe 都注入、再由腳本自己判斷網域） */
+    private val youtubeScript: String by lazy { asset("yt_subs.js") }
+
+    /**
+     * 讀注入用的腳本，去掉整行註解與行首縮排（每個 iframe 都要解析一次，約省四分之一）。
+     * 這幾個檔案沒有樣板字串（反引號），每行開頭的空白與 // 整行註解拿掉不會改變程式意思
+     */
+    private fun asset(vararg names: String): String {
         val assets = getApplication<Application>().assets
-        // yt_subs.js 自己判斷網域，只在 YouTube 上啟用
-        listOf("gesture_layer.js", "video_detect.js", "yt_subs.js", "pw_autofill.js").joinToString("\n") { name -> assets.open(name).bufferedReader().use { it.readText() } }
+        return names.joinToString("\n") { name ->
+            assets.open(name).bufferedReader().useLines { lines ->
+                lines.map { it.trimStart() }.filter { it.isNotEmpty() && !it.startsWith("//") }.joinToString("\n")
+            }
+        }
     }
 
     override fun injectedScript() = videoScript
+    override fun youtubeScript() = youtubeScript
 
     /** 等待區域網路權限的分頁；MainActivity 看到後向使用者要求權限，同意後重新載入 */
     var localNetworkRequest by mutableStateOf<Tab?>(null)
@@ -458,7 +471,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         val live = tabs.count { it.live || it == cur }
         val n = (live - keep).coerceAtMost(candidates.size)
         if (n <= 0) return
-        candidates.take(n).forEach { it.discard() }
+        candidates.take(n).forEach { if (it.discard()) cancelTranslations(it) }
         com.liquid.browser.BugLog.event("memory", "釋放 $n 個背景分頁（活著 $live → ${live - n}）")
     }
 
@@ -482,6 +495,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         val siblings = tabs.filter { it.incognito == tab.incognito }
         val i = siblings.indexOf(tab)
         tabs.remove(tab)
+        cancelTranslations(tab)
         tabs.forEach { if (it.opener == tab) it.opener = null }
         tab.destroyWebView()
         permissionQueue.filter { it.tab == tab }.forEach { permissionQueue.remove(it); it.result(false) }
@@ -972,7 +986,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     override fun onReapplyTranslation(tab: Tab) { if (!tab.translated) toggleTranslate(tab) }
 
     fun toggleTranslate(tab: Tab) {
-        if (tab.translated) tab.showOriginal()
+        if (tab.translated) { cancelTranslations(tab); tab.showOriginal() }
         else {
             aiFailedFor = null
             // 設定改過目標語言：先丟掉頁面上舊語言的譯文
@@ -990,10 +1004,11 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     fun clearTranslationCache() = viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) { translationCache.clear() }
 
     override fun onTranslateBatch(tab: Tab, id: Int, texts: List<String>) {
-        viewModelScope.launch {
+        trScope(tab).launch {
             translateTexts(tab, texts).onSuccess { tr ->
                 tab.eval("window.__lqTr&&window.__lqTr.apply($id, ${org.json.JSONArray(tr)});")
             }.onFailure { e ->
+                if (e is kotlinx.coroutines.CancellationException) return@onFailure
                 tab.eval("window.__lqTr&&window.__lqTr.fail($id);")
                 showToast(t("翻譯失敗：%1\$s", e.message))
             }
@@ -1001,10 +1016,11 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     }
 
     override fun onSubtitleBatch(tab: Tab, id: Int, texts: List<String>) {
-        viewModelScope.launch {
+        trScope(tab).launch {
             translateTexts(tab, texts).onSuccess { tr ->
                 tab.eval("window.__lqYt&&window.__lqYt.apply($id, ${org.json.JSONArray(tr)});")
             }.onFailure { e ->
+                if (e is kotlinx.coroutines.CancellationException) return@onFailure
                 tab.eval("window.__lqYt&&window.__lqYt.fail($id);")
                 com.liquid.browser.BugLog.event("translate", "字幕翻譯失敗：${e.message}")
                 if (tab == current) showToast(t("翻譯失敗：%1\$s", e.message))
@@ -1022,18 +1038,36 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         if (on) showToast(t("字幕翻譯已開啟"))
     }
 
-    private val trPending = mutableListOf<Pair<List<String>, kotlinx.coroutines.CompletableDeferred<Map<String, String>>>>()
+    private val trPending = HashMap<Tab, MutableList<Pair<List<String>, kotlinx.coroutines.CompletableDeferred<Map<String, String>>>>>()
+
+    /**
+     * 每個分頁自己的翻譯工作：換頁、關分頁、切回原文、分頁被釋放時一起取消（[cancelTranslations]），
+     * 已送出的請求連線馬上中斷，不再花 API 額度翻一個已經不在畫面上的網頁
+     */
+    private val trScopes = HashMap<Tab, kotlinx.coroutines.CoroutineScope>()
+
+    private fun trScope(tab: Tab) = trScopes.getOrPut(tab) {
+        kotlinx.coroutines.CoroutineScope(viewModelScope.coroutineContext + kotlinx.coroutines.SupervisorJob(viewModelScope.coroutineContext[kotlinx.coroutines.Job]))
+    }
+
+    private fun cancelTranslations(tab: Tab) {
+        trScopes.remove(tab)?.coroutineContext?.get(kotlinx.coroutines.Job)?.cancel()
+        trPending.remove(tab)
+    }
+
+    override fun onPageStart(tab: Tab) = cancelTranslations(tab)
 
     /**
      * AI 翻譯合併送出：網頁一次丟來好幾批（每批最多 30 段），等 80ms 收齊後合併後拆成小請求（第一個約 250 字、其餘約 500 字，最多 8 個同時跑），
      * 重複的文字只送一次。系統提示詞不用每 30 段重送一遍，請求數也少很多。只在主執行緒呼叫
      */
-    private suspend fun mergedTranslate(todo: List<String>, send: suspend (List<String>, ((Int, String) -> Unit)?) -> List<String>): Map<String, String> {
+    private suspend fun mergedTranslate(tab: Tab, todo: List<String>, send: suspend (List<String>, ((Int, String) -> Unit)?) -> List<String>): Map<String, String> {
         val done = kotlinx.coroutines.CompletableDeferred<Map<String, String>>()
-        trPending += todo to done
-        if (trPending.size == 1) viewModelScope.launch {
+        val queue = trPending.getOrPut(tab) { mutableListOf() }
+        queue += todo to done
+        if (queue.size == 1) trScope(tab).launch {
             delay(80)
-            val jobs = trPending.toList().also { trPending.clear() }
+            val jobs = queue.toList().also { queue.clear() }
             val all = jobs.flatMap { it.first }.distinct()
             val parts = mutableListOf(mutableListOf<String>())
             var chars = 0
@@ -1066,7 +1100,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
                     (if (engine.isFree) freeGate else translateGate).withPermit {
                         runCatching { Translator.translate(part, engine, s.translateKeys[engine.keyOwner].orEmpty(), s.translateModels[engine].orEmpty(), target, onLine) }
                             .recoverCatching { e ->
-                                if (engine == TranslateEngine.Tencent) throw e
+                                if (engine == TranslateEngine.Tencent || e is kotlinx.coroutines.CancellationException) throw e
                                 com.liquid.browser.BugLog.event("translate", "$engine 失敗，改用免費翻譯：${e.message}")
                                 if (aiFailedFor != tab) { aiFailedFor = tab; showToast(t("%1\$s，改用免費翻譯", e.message)) }
                                 Translator.translate(part, TranslateEngine.Tencent, "", "", target)
@@ -1074,7 +1108,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
                     }
                 }
                 val fresh = if (todo.isEmpty()) emptyMap() else {
-                    val all = if (engine.isFree) todo.zip(send(todo, null)).toMap() else mergedTranslate(todo, send)
+                    val all = if (engine.isFree) todo.zip(send(todo, null)).toMap() else mergedTranslate(tab, todo, send)
                     todo.associateWith { all[it] ?: it }.also { m ->
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { translationCache.put(target.google, m) }
                     }

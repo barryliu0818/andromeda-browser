@@ -6,10 +6,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import com.liquid.browser.core.Http
+import okhttp3.FormBody
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
-import java.net.URLEncoder
 
 /**
  * 網頁翻譯引擎。
@@ -109,29 +111,27 @@ object Translator {
         (System.nanoTime() - start) / 1_000_000
     }
 
+    private const val UA = "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36"
+    private val JSON_TYPE = "application/json".toMediaType()
+
     /** 騰訊交互翻譯（TranSmart）：一次送多段，來源語言自動偵測 */
-    fun tencent(texts: List<String>, target: TargetLang): List<String> {
+    suspend fun tencent(texts: List<String>, target: TargetLang): List<String> {
         val payload = JSONObject()
             .put("header", JSONObject().put("fn", "auto_translation").put("client_key", "browser-chrome-140.0.0-Android-liquid"))
             .put("type", "plain")
             .put("model_category", "normal")
             .put("source", JSONObject().put("lang", "auto").put("text_list", JSONArray(texts)))
             .put("target", JSONObject().put("lang", target.tencent ?: target.google))
-        val conn = (URL(TranslateEngine.Tencent.endpoint).openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            doOutput = true
-            connectTimeout = 10_000
-            readTimeout = 20_000
-            setRequestProperty("Content-Type", "application/json")
-            setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36")
-        }
-        try {
-            conn.outputStream.use { it.write(payload.toString().toByteArray()) }
-            if (conn.responseCode != 200) throw IOException(t("騰訊翻譯 HTTP %1\$s", conn.responseCode))
-            val res = JSONObject(conn.inputStream.bufferedReader().readText())
+        val req = Request.Builder().url(TranslateEngine.Tencent.endpoint)
+            .header("User-Agent", UA)
+            .post(payload.toString().toRequestBody(JSON_TYPE))
+            .build()
+        return Http.exec(req) { r ->
+            if (r.code != 200) throw IOException(t("騰訊翻譯 HTTP %1\$s", r.code))
+            val res = JSONObject(r.body.string())
             val arr = res.optJSONArray("auto_translation") ?: throw IOException("騰訊翻譯：${res.optJSONObject("header")?.optString("ret_code")}")
-            return List(texts.size) { i -> arr.optString(i, texts[i]).ifEmpty { texts[i] } }
-        } finally { conn.disconnect() }
+            List(texts.size) { i -> arr.optString(i, texts[i]).ifEmpty { texts[i] } }
+        }
     }
 
     /** 被限流（HTTP 429）時等一下再試：1.5 秒、3 秒 */
@@ -145,33 +145,29 @@ object Translator {
     private class RateLimited : IOException(t("Google 翻譯暫時限流，請稍後再試"))
 
     /** Google 公開端點：一次送多個 q，回傳每項的譯文（sl=auto 時每項為 [譯文, 偵測到的語言]） */
-    private fun googleOnce(texts: List<String>, target: TargetLang): List<String> {
-        val body = texts.joinToString("&") { "q=" + URLEncoder.encode(it, "UTF-8") }
-        val conn = (URL("${TranslateEngine.Free.endpoint}?client=gtx&sl=auto&tl=${target.google}").openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            doOutput = true
-            connectTimeout = 10_000
-            readTimeout = 20_000
-            setRequestProperty("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8")
-            // 預設的 Dalvik User-Agent 會被導到「異常流量」頁（302／429），改用一般瀏覽器的 User-Agent
-            setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36")
-        }
-        try {
-            conn.outputStream.use { it.write(body.toByteArray()) }
-            if (conn.responseCode == 429 || conn.responseCode == 302) throw RateLimited()
-            if (conn.responseCode != 200) throw IOException("Google 翻譯 HTTP ${conn.responseCode}")
-            val text = conn.inputStream.bufferedReader().readText().trim()
+    private suspend fun googleOnce(texts: List<String>, target: TargetLang): List<String> {
+        val form = FormBody.Builder(Charsets.UTF_8).apply { texts.forEach { add("q", it) } }.build()
+        // 預設的 OkHttp User-Agent 會被導到「異常流量」頁（302／429），改用一般瀏覽器的 User-Agent
+        val req = Request.Builder().url("${TranslateEngine.Free.endpoint}?client=gtx&sl=auto&tl=${target.google}")
+            .header("User-Agent", UA)
+            .post(form)
+            .build()
+        return Http.exec(req) { r ->
+            if (r.code == 429 || r.code == 302) throw RateLimited()
+            if (r.code != 200) throw IOException("Google 翻譯 HTTP ${r.code}")
+            val text = r.body.string().trim()
             // 單一 q 時回傳字串或 [譯文, 語言]；多個 q 時回傳陣列
             if (texts.size == 1) {
-                return listOf(if (text.startsWith("[")) JSONArray(text).let { a -> (a.opt(0) as? JSONArray)?.optString(0) ?: a.optString(0) } else JSONArray("[$text]").optString(0))
+                listOf(if (text.startsWith("[")) JSONArray(text).let { a -> (a.opt(0) as? JSONArray)?.optString(0) ?: a.optString(0) } else JSONArray("[$text]").optString(0))
+            } else {
+                val arr = JSONArray(text)
+                List(texts.size) { i -> (arr.opt(i) as? JSONArray)?.optString(0) ?: arr.optString(i, texts[i]) }
             }
-            val arr = JSONArray(text)
-            return List(texts.size) { i -> (arr.opt(i) as? JSONArray)?.optString(0) ?: arr.optString(i, texts[i]) }
-        } finally { conn.disconnect() }
+        }
     }
 
     /** OpenAI 相容的 Chat Completions（DeepSeek、千問、GLM） */
-    private fun llm(texts: List<String>, engine: TranslateEngine, key: String, model: String, target: TargetLang, onLine: ((Int, String) -> Unit)? = null): List<String> =
+    private suspend fun llm(texts: List<String>, engine: TranslateEngine, key: String, model: String, target: TargetLang, onLine: ((Int, String) -> Unit)? = null): List<String> =
         try {
             // 百煉上的 GLM 不接受 enable_thinking=false（HTTP 400、沒有錯誤訊息）：GLM 不送這個參數
             llmOnce(texts, engine, key, model, target, thinkingOff = engine != TranslateEngine.Glm, onLine)
@@ -181,7 +177,7 @@ object Translator {
                 llmOnce(texts, engine, key, model, target, thinkingOff = false, onLine) else throw e
         }
 
-    private fun llmOnce(texts: List<String>, engine: TranslateEngine, key: String, model: String, target: TargetLang, thinkingOff: Boolean, onLine: ((Int, String) -> Unit)?): List<String> {
+    private suspend fun llmOnce(texts: List<String>, engine: TranslateEngine, key: String, model: String, target: TargetLang, thinkingOff: Boolean, onLine: ((Int, String) -> Unit)?): List<String> {
         val payload = JSONObject()
             .put("model", model)
             .put("temperature", 0.2)
@@ -195,27 +191,21 @@ object Translator {
                     .put(JSONObject().put("role", "system").put("content", prompt(target)))
                     .put(JSONObject().put("role", "user").put("content", encodeLines(texts))),
             )
-        val conn = (URL(engine.endpoint).openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            doOutput = true
-            connectTimeout = 15_000
-            readTimeout = 60_000
-            setRequestProperty("Content-Type", "application/json")
-            setRequestProperty("Authorization", "Bearer $key")
-        }
+        val req = Request.Builder().url(engine.endpoint)
+            .header("Authorization", "Bearer $key")
+            .post(payload.toString().toRequestBody(JSON_TYPE))
+            .build()
         val t0 = System.nanoTime(); var tFirst = 0L
-        try {
-            conn.outputStream.use { it.write(payload.toString().toByteArray()) }
-            val code = conn.responseCode
-            if (code != 200) {
-                val err = conn.errorStream?.bufferedReader()?.readText().orEmpty()
+        val content = StringBuilder()
+        Http.exec(req) { r ->
+            if (r.code != 200) {
+                val err = r.body.string()
                 val msg = runCatching { JSONObject(err).optJSONObject("error")?.optString("message") }.getOrNull()
                 val hint = if (msg?.contains("Access denied", true) == true) t("（請先在阿里雲百煉控制台開通 %1\$s）", model) else ""
-                throw IOException("${engine.label} HTTP $code${msg?.let { "：$it" }.orEmpty()}$hint")
+                throw IOException("${engine.label} HTTP ${r.code}${msg?.let { "：$it" }.orEmpty()}$hint")
             }
-            val content = StringBuilder()
             var lineStart = 0
-            conn.inputStream.bufferedReader().useLines { sse ->
+            r.body.charStream().buffered().useLines { sse ->
                 for (ev in sse) {
                     if (!ev.startsWith("data:")) continue
                     val data = ev.substring(5).trim()
@@ -233,16 +223,16 @@ object Translator {
                     }
                 }
             }
-            // 以編號對回原文，不會錯位
-            android.util.Log.i("OreaTr", "llm ${texts.size}段 in=${texts.sumOf { it.length }} out=${content.length} first=${(tFirst - t0) / 1_000_000}ms total=${(System.nanoTime() - t0) / 1_000_000}ms")
-            val out = parseLines(content.toString(), texts.size).toMutableList()
-            // 模型漏掉的段落改用免費引擎補翻
-            val missing = out.indices.filter { out[it] == null }
-            if (missing.isNotEmpty()) {
-                val filled = runCatching { tencent(missing.map { texts[it] }, target) }.getOrNull()
-                missing.forEachIndexed { k, i -> out[i] = filled?.getOrNull(k) ?: texts[i] }
-            }
-            return out.map { it!! }
-        } finally { conn.disconnect() }
+        }
+        // 以編號對回原文，不會錯位
+        android.util.Log.i("OreaTr", "llm ${texts.size}段 in=${texts.sumOf { it.length }} out=${content.length} first=${(tFirst - t0) / 1_000_000}ms total=${(System.nanoTime() - t0) / 1_000_000}ms")
+        val out = parseLines(content.toString(), texts.size).toMutableList()
+        // 模型漏掉的段落改用免費引擎補翻
+        val missing = out.indices.filter { out[it] == null }
+        if (missing.isNotEmpty()) {
+            val filled = runCatching { tencent(missing.map { texts[it] }, target) }.getOrNull()
+            missing.forEachIndexed { k, i -> out[i] = filled?.getOrNull(k) ?: texts[i] }
+        }
+        return out.map { it!! }
     }
 }

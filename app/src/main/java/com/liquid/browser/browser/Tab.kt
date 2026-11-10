@@ -119,14 +119,18 @@ class Tab(
 
         /** 網頁影片旁的「下載」鈕 */
         fun onVideoDownload(tab: Tab, src: String, title: String)
-        /** 注入每個頁面的 JS（assets/gesture_layer.js＋video_detect.js） */
+        /** 注入每個頁面的 JS（assets/gesture_layer.js＋video_detect.js＋pw_autofill.js） */
         fun injectedScript(): String
+        /** 只注入 YouTube 的 JS（assets/yt_subs.js） */
+        fun youtubeScript(): String
         /** Android 17 區域網路權限不足而無法載入（ERR_LOCAL_NETWORK_PERMISSION_MISSING） */
         fun onLocalNetworkNeeded(tab: Tab)
         /** 網頁要位置／相機／麥克風（geolocation、getUserMedia） */
         fun onSitePermission(tab: Tab, origin: String, kinds: Set<SiteKind>, result: (Boolean) -> Unit)
         /** 分頁換到另一個網站（origin 改變） */
         fun onSiteChanged(tab: Tab) {}
+        /** 開始載入新的網頁（舊網頁還沒翻完的翻譯要取消） */
+        fun onPageStart(tab: Tab) {}
         /** 網頁取消了還沒回覆的權限要求 */
         fun onSitePermissionCancel(tab: Tab)
         /** 網頁的 <input type=file>（含 capture 拍照）：回傳 true 表示會呼叫 callback */
@@ -510,6 +514,7 @@ class Tab(
                 if (legacyInject && !incognito) Extensions.documentStartScript()?.let { view.evaluateJavascript(it, null) }
                 if (legacyInject && listener.shields()) view.evaluateJavascript(Shields.fingerprintJs, null)
                 if (legacyInject) view.evaluateJavascript(geoApproxScript(SitePermissionStore.approxOrigins(incognito)), null)
+                listener.onPageStart(this@Tab)
                 translated = false
                 trTarget = null
                 trSent = 0
@@ -575,7 +580,7 @@ class Tab(
                 }
                 // 這頁之前翻譯過（重新整理、返回時重新載入）：自動再翻一次（譯文走快取，不花 API 額度）
                 if (!translated && u in translatedUrls) listener.onReapplyTranslation(this@Tab)
-                if (legacyInject) view.evaluateJavascript(listener.injectedScript(), null)
+                if (legacyInject) view.evaluateJavascript(listener.injectedScript() + ";\n" + listener.youtubeScript(), null)
                 // 同一頁可能觸發多次 onPageFinished（重新導向、SPA），只在網址改變時記錄一次
                 if (u != lastRecorded && !loadFailed) {
                     lastRecorded = u
@@ -724,6 +729,7 @@ class Tab(
         val script = listener.injectedScript()
         if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
             WebViewCompat.addDocumentStartJavaScript(webView, script, setOf("*"))
+            WebViewCompat.addDocumentStartJavaScript(webView, listener.youtubeScript(), setOf("https://youtube.com", "https://*.youtube.com"))
         } else {
             legacyInject = true
         }
@@ -1182,11 +1188,17 @@ private const val LIFT_FIXED_JS = """(function(){
     }
     return p;
   }
-  function scan() {
+  // 只檢查 roots 底下的元素（DOM 變動時只看新加進來的那幾塊，以前每次變動都整頁重掃，無限捲動的頁面會一直掃）
+  function scan(roots) {
     if (!document.body) return;
     var gap = inset(); if (!gap) return;
     var vh = window.innerHeight, vw = window.innerWidth;
-    var all = document.body.getElementsByTagName('*');
+    var all = [];
+    (roots || [document.body]).forEach(function (r) {
+      if (!r.isConnected || r.nodeType !== 1) return;
+      all.push(r);
+      Array.prototype.push.apply(all, r.getElementsByTagName('*'));
+    });
     for (var i = 0; i < all.length; i++) {
       var el = all[i];
       if (el.offsetParent !== null || el.__lqLifted) continue;
@@ -1202,14 +1214,20 @@ private const val LIFT_FIXED_JS = """(function(){
       el.__lqLifted = true;
     }
   }
-  var t = 0;
-  function later() { clearTimeout(t); t = setTimeout(scan, 400); }
+  var t = 0, added = [];
+  function later(list) {
+    list.forEach(function (m) { for (var j = 0; j < m.addedNodes.length; j++) if (m.addedNodes[j].nodeType === 1) added.push(m.addedNodes[j]); });
+    if (!added.length) return;
+    clearTimeout(t);
+    t = setTimeout(function () { var r = added; added = []; scan(r.length > 200 ? null : r); }, 400);
+  }
   document.addEventListener('DOMContentLoaded', function () {
     scan();
     new MutationObserver(later).observe(document.body, { childList: true, subtree: true });
+    // 已經在頁面上、晚幾秒才改成 fixed 的橫幅（樣式改變不會觸發 childList）：前 30 秒每 2 秒整頁補掃
     var n = 0, iv = setInterval(function () { scan(); if (++n >= 15) clearInterval(iv); }, 2000);
   });
-  window.addEventListener('load', scan);
+  window.addEventListener('load', function () { scan(); });
 })();"""
 
 private const val END_SPACER_JS = """(function(){

@@ -11,6 +11,9 @@ import android.database.sqlite.SQLiteOpenHelper
  * 以「目標語言＋原文」為鍵，不分引擎（換引擎也能沿用）；超過上限時刪掉最久沒用到的。
  */
 class TranslationCache(context: Context) : SQLiteOpenHelper(context, "translations.db", null, 1) {
+    // WAL：查詢與寫入不互相等待，寫入也比預設的回滾日誌快
+    init { setWriteAheadLoggingEnabled(true) }
+
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE tr (k TEXT PRIMARY KEY, v TEXT NOT NULL, used INTEGER NOT NULL)")
         db.execSQL("CREATE INDEX tr_used ON tr(used)")
@@ -27,14 +30,20 @@ class TranslationCache(context: Context) : SQLiteOpenHelper(context, "translatio
         val out = HashMap<String, String>()
         val db = writableDatabase
         val now = System.currentTimeMillis()
-        // SQLite 參數上限 999：分批查
-        texts.distinct().chunked(500).forEach { part ->
-            val args = part.map { key(target, it) }.toTypedArray()
-            db.rawQuery("SELECT k, v FROM tr WHERE k IN (${args.joinToString(",") { "?" }})", args).use { c ->
-                while (c.moveToNext()) out[c.getString(0).substringAfter('\u0001')] = c.getString(1)
+        // 使用時間只在超過一天沒更新時才寫（以前每查一批就寫一次；翻過的頁面重新整理會連續查很多批），
+        // 整批在一個交易裡做完
+        db.beginTransaction()
+        try {
+            // SQLite 參數上限 999：分批查
+            texts.distinct().chunked(500).forEach { part ->
+                val args = part.map { key(target, it) }.toTypedArray()
+                db.rawQuery("SELECT k, v FROM tr WHERE k IN (${args.joinToString(",") { "?" }})", args).use { c ->
+                    while (c.moveToNext()) out[c.getString(0).substringAfter('\u0001')] = c.getString(1)
+                }
+                db.execSQL("UPDATE tr SET used = $now WHERE used < ${now - 86_400_000L} AND k IN (${args.joinToString(",") { "?" }})", args)
             }
-            db.execSQL("UPDATE tr SET used = $now WHERE k IN (${args.joinToString(",") { "?" }})", args)
-        }
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
         return out
     }
 

@@ -19,7 +19,7 @@ fun installImageLoader(context: Context) {
                 add(
                     OkHttpNetworkFetcherFactory(
                         callFactory = {
-                            OkHttpClient.Builder()
+                            Http.client.newBuilder() // 共用連線池
                                 .addInterceptor { chain -> chain.proceed(chain.request().newBuilder().header("User-Agent", ua).build()) }
                                 .build()
                         },
