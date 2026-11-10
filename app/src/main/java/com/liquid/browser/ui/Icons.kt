@@ -31,8 +31,9 @@ import com.liquid.browser.core.Palette
 val accent: Color
     @Composable get() = if (isSystemInDarkTheme()) Palette.AccentDark else Palette.AccentLight
 
-// Material Symbols Rounded 可變字型，細線條（wght 300）。圖示用連字輸入名稱：Sym("arrow_back")。
-// ponytail: 目前打包完整 15MB 字型；圖示集確定後用 fonttools 子集化到實際用到的字形。
+// Material Symbols Rounded，細線條（wght 300）。圖示用連字輸入名稱：Sym("arrow_back")。
+// 打包的是子集（約 34KB，只含程式碼裡用到的圖示，已固定成 wght 300／FILL 0）：
+// 新增圖示後要跑 scripts/subset-icons.py，否則新圖示會顯示成文字。完整字型在 fonts-src/。
 val Symbols = FontFamily(
     Font(
         R.font.material_symbols_rounded,
