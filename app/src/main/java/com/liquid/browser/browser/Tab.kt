@@ -50,7 +50,7 @@ data class HitResult(val link: String?, val image: String?, val x: Float, val y:
 class Tab(
     val id: Long,
     val incognito: Boolean,
-    context: Context,
+    private val context: Context,
     private val listener: Listener,
     desktopByDefault: Boolean = false,
     identifyAsIPhone: Boolean = true,
@@ -141,7 +141,15 @@ class Tab(
         fun onExtensionOffer(tab: Tab, url: String)
     }
 
-    val webView = WebView(context)
+    /**
+     * 這個分頁的 WebView：第一次用到才建立（重開 App 還原 20 個分頁時，不必一開始就建 20 個 WebView），
+     * 記憶體吃緊時背景分頁可以釋放（[discard]），切回來再建。只在「真的要顯示或操作網頁」時讀它；
+     * 只想「有就做、沒有就算了」的地方用 [web]
+     */
+    val webView: WebView get() = web ?: createWebView()
+    private var web: WebView? = null
+    /** WebView 已建立（沒被釋放） */
+    val live: Boolean get() = web != null
     var url by mutableStateOf("")
     /** 上一次記錄到的網站（scheme://host:port），換網站時清掉「直到關閉網站」的權限 */
     private var lastSite: String? = null
@@ -177,7 +185,8 @@ class Tab(
     fun applyShields(on: Boolean) {
         shieldsHandler?.remove()
         shieldsHandler = null
-        if (on && !legacyInject) shieldsHandler = WebViewCompat.addDocumentStartJavaScript(webView, Shields.fingerprintJs, setOf("*"))
+        val w = web ?: return
+        if (on && !legacyInject) shieldsHandler = WebViewCompat.addDocumentStartJavaScript(w, Shields.fingerprintJs, setOf("*"))
     }
 
     private var geoHandler: ScriptHandler? = null
@@ -186,19 +195,21 @@ class Tab(
     fun applyGeo() {
         geoHandler?.remove()
         geoHandler = null
-        if (!legacyInject) geoHandler = WebViewCompat.addDocumentStartJavaScript(webView, geoApproxScript(SitePermissionStore.approxOrigins(incognito)), setOf("*"))
+        val w = web ?: return
+        if (!legacyInject) geoHandler = WebViewCompat.addDocumentStartJavaScript(w, geoApproxScript(SitePermissionStore.approxOrigins(incognito)), setOf("*"))
     }
 
     /** 剛選了大概位置：目前這一頁馬上改成模糊座標（位置在這之後才送給網頁） */
-    fun markGeoApprox() = webView.evaluateJavascript("window.__lqGeoApprox=true", null)
+    fun markGeoApprox() = web?.evaluateJavascript("window.__lqGeoApprox=true", null)
 
     /** 擴充功能的開頁腳本（安裝、移除、開關後重新註冊）。無痕分頁不跑擴充，跟 Firefox 的預設一樣 */
     fun applyExtensions() {
         extHandler?.remove()
         extHandler = null
+        val w = web ?: return
         if (incognito || legacyInject) return
         val js = Extensions.documentStartScript() ?: return
-        extHandler = WebViewCompat.addDocumentStartJavaScript(webView, js, setOf("*"))
+        extHandler = WebViewCompat.addDocumentStartJavaScript(w, js, setOf("*"))
     }
     /** 目前實際套用的是否為 Apple 身分（個別網站例外時與 asIPhone 不同） */
     private var appliedIos: Boolean? = null
@@ -277,7 +288,7 @@ class Tab(
     /** 換語言前：還原原文並丟掉舊譯文 */
     fun resetTranslate() {
         translated = false
-        webView.evaluateJavascript("window.__lqTr&&window.__lqTr.reset();", null)
+        web?.evaluateJavascript("window.__lqTr&&window.__lqTr.reset();", null)
     }
 
     /** YouTube 字幕翻譯是否開著（只在 YouTube 頁面有意義；換頁不關，換影片時腳本自己抓新字幕） */
@@ -309,13 +320,13 @@ class Tab(
 
     fun setYouTubeSubs(on: Boolean) {
         ytSubs = on
-        webView.evaluateJavascript(if (on) "window.__lqYt&&window.__lqYt.start();" else "window.__lqYt&&window.__lqYt.stop();", null)
+        web?.evaluateJavascript(if (on) "window.__lqYt&&window.__lqYt.start();" else "window.__lqYt&&window.__lqYt.stop();", null)
     }
 
     fun showOriginal() {
         translated = false
         translatedUrls -= url
-        webView.evaluateJavascript("window.__lqTr&&window.__lqTr.restore();", null)
+        web?.evaluateJavascript("window.__lqTr&&window.__lqTr.restore();", null)
     }
 
     /** 這個頁面已阻擋的廣告／追蹤請求數 */
@@ -347,10 +358,16 @@ class Tab(
 
     /** 第三方 Cookie（嵌在別的網站裡的追蹤 Cookie）：預設封鎖；無痕分頁一律封鎖 */
     fun setThirdPartyCookies(allow: Boolean) =
-        android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(webView, allow && !incognito)
+        android.webkit.CookieManager.getInstance().run { web?.let { setAcceptThirdPartyCookies(it, allow && !incognito) } }
 
     init {
         refreshBlocking()
+    }
+
+    /** 建立並設定這個分頁的 WebView（第一次用到 [webView] 時；被 [discard] 釋放後再用到時重建） */
+    private fun createWebView(): WebView {
+        val w = WebView(context)
+        web = w
         setThirdPartyCookies(listener.allowThirdPartyCookies())
         // Compose AndroidView 預設給 WRAP_CONTENT：WebView 會把版面高度當成 0（高度隨內容延展），
         // 導致網頁的 100vh／dvh 變成 0（例如 Google 首頁整個擠在上方）。明確指定 MATCH_PARENT。
@@ -696,6 +713,7 @@ class Tab(
                 else -> false
             }
         }
+        return w
     }
 
     /**
@@ -806,6 +824,8 @@ class Tab(
      *  Android＋桌面版 → 桌面 Chrome；Android＋行動版 → WebView 預設。
      */
     private fun applyIdentity(reload: Boolean, forUrl: String? = url) {
+        // 還沒建立 WebView：建立時會用當下的設定再套一次
+        if (web == null) { appliedIos = null; return }
         val ctx = webView.context
         val asIPhone = iosFor(forUrl)
         appliedIos = asIPhone
@@ -948,7 +968,7 @@ class Tab(
         return (listOf(u) + inner).any { AdBlocker.isAdNavigation(it, from) }
     }
 
-    fun unblockLastTap() = webView.evaluateJavascript("window.__lqUnblock&&window.__lqUnblock()", null)
+    fun unblockLastTap() = web?.evaluateJavascript("window.__lqUnblock&&window.__lqUnblock()", null)
 
     /** 下拉重新整理：目前下拉距離（px，未阻尼）與是否正在重新整理（轉圈直到載入完成） */
     var pull by mutableFloatStateOf(0f)
@@ -1029,7 +1049,7 @@ class Tab(
 
     /** 上一頁紀錄（存工作階段用）：還沒載入的分頁回傳還原時拿到的那份 */
     fun historyState(): android.os.Bundle? =
-        pendingState ?: if (pending) null else android.os.Bundle().takeIf { runCatching { webView.saveState(it) }.getOrNull() != null }
+        pendingState ?: if (pending) null else android.os.Bundle().takeIf { runCatching { web?.saveState(it) }.getOrNull() != null }
 
     /**
      * 載入還原的網頁：先用快取（看過的網頁幾乎立刻出現、不重新下載），有上一頁紀錄就連紀錄一起還原。
@@ -1055,10 +1075,46 @@ class Tab(
     fun setForeground(on: Boolean) {
         if (on) { lastUsed = System.currentTimeMillis(); loadPending() }
         // 背景分頁暫停動畫與額外處理，省 CPU 與電量；切回來時恢復。WebView 已銷毀時（分頁剛被關閉或重建）不做事
-        runCatching { if (on) webView.onResume() else webView.onPause() }
+        runCatching { if (on) web?.onResume() else web?.onPause() }
         // 不開 offscreenPreRaster：會讓渲染程序多佔大量記憶體，小米 HyperOS 等積極回收的系統會因此結束渲染程序
-        runCatching { webView.setRendererPriorityPolicy(if (on) WebView.RENDERER_PRIORITY_IMPORTANT else WebView.RENDERER_PRIORITY_BOUND, true) }
+        runCatching { web?.setRendererPriorityPolicy(if (on) WebView.RENDERER_PRIORITY_IMPORTANT else WebView.RENDERER_PRIORITY_BOUND, true) }
     }
+
+    /** 在網頁裡執行腳本；WebView 已釋放就不做（不會為了回填譯文之類的事重建 WebView） */
+    fun eval(js: String) { web?.evaluateJavascript(js, null) }
+
+    /**
+     * 釋放背景分頁的 WebView（Chromium 的 tab discarding）：上一頁紀錄存起來、縮圖留著，
+     * 切回來時跟重開 App 還原的分頁一樣重新載入。回傳是否有釋放
+     */
+    fun discard(): Boolean {
+        val w = web ?: return false
+        if (pending || isBlank) return false
+        val st = android.os.Bundle().takeIf { runCatching { w.saveState(it) }.getOrNull() != null }
+        destroyWebView()
+        pendingUrl = url
+        pendingState = st
+        progress = 100
+        refreshing = false
+        return true
+    }
+
+    /** 關閉分頁或釋放時銷毀 WebView；之後再讀 [webView] 會建一個新的 */
+    fun destroyWebView() {
+        val w = web ?: return
+        web = null
+        (w.parent as? ViewGroup)?.removeView(w)
+        runCatching { w.destroy() }
+        iosShim = null; extHandler = null; shieldsHandler = null; geoHandler = null
+        appliedIos = null
+        legacyInject = false
+        pageShots.clear()
+        media.clear()
+        translated = false
+    }
+
+    /** 記憶體吃緊：離開頁面時留下的截圖（邊緣滑動返回用）清掉 */
+    fun trimShots() = pageShots.clear()
 
     /** 分頁總覽用的縮圖；onDone 在縮圖更新後（或無法擷取時）呼叫 */
     fun snapshot(onDone: () -> Unit = {}) {
@@ -1077,13 +1133,14 @@ class Tab(
     fun freezeFrame(onDone: (ImageBitmap?) -> Unit) = capture({ onDone(it) }, onFail = { onDone(null) }, scale = 1f)
 
     private fun capture(onDone: (ImageBitmap) -> Unit, onFail: () -> Unit = {}, scale: Float = 0.4f) {
-        val activity = (webView.context as? android.content.MutableContextWrapper)?.baseContext as? android.app.Activity
-        val w = webView.width
-        val h = webView.height - controlsBottomPx
+        val wv = web ?: return onFail()
+        val activity = (wv.context as? android.content.MutableContextWrapper)?.baseContext as? android.app.Activity
+        val w = wv.width
+        val h = wv.height - controlsBottomPx
         // 網頁要真的顯示在螢幕上才擷取（擷取的是螢幕畫面）：被分頁總覽蓋住、INVISIBLE 或不是目前分頁時跳過，
         // 否則會拍到總覽畫面或別的分頁，存成錯的縮圖
-        if (activity == null || w <= 0 || h <= 0 || !webView.isAttachedToWindow || !webView.isShown) { onFail(); return }
-        val loc = IntArray(2).also { webView.getLocationInWindow(it) }
+        if (activity == null || w <= 0 || h <= 0 || !wv.isAttachedToWindow || !wv.isShown) { onFail(); return }
+        val loc = IntArray(2).also { wv.getLocationInWindow(it) }
         val bmp = Bitmap.createBitmap((w * scale).toInt().coerceAtLeast(1), (h * scale).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
         runCatching {
             android.view.PixelCopy.request(

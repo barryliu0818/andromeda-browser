@@ -70,7 +70,14 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     var incognitoMode by mutableStateOf(false)
 
     val settingsStore = SettingsStore(app)
-    val settings: StateFlow<Settings> = settingsStore.flow.stateIn(viewModelScope, SharingStarted.Eagerly, Settings())
+    /**
+     * 設定。初始值等 DataStore 讀完（通常十幾毫秒，最多等 500ms）：以前先用預設值，重開 App 還原分頁時
+     * 「識別為 iPhone」「預設桌面版」都還是預設值，設定讀到後目前分頁又重新載入一次
+     */
+    val settings: StateFlow<Settings> = settingsStore.flow.stateIn(
+        viewModelScope, SharingStarted.Eagerly,
+        kotlinx.coroutines.runBlocking { kotlinx.coroutines.withTimeoutOrNull(500) { settingsStore.flow.first() } } ?: Settings(),
+    )
 
     /** 網頁影片全螢幕（WebChromeClient.onShowCustomView）的 View 與回呼 */
     var customView by mutableStateOf<View?>(null)
@@ -436,6 +443,32 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         collapsed = false
         // 離開沒開過網頁的起始頁時直接丟掉，總覽裡不會一直留著一張起始頁
         if (prev != null && prev.isBlank) close(prev)
+        discardBeyond(MAX_LIVE_TABS)
+    }
+
+    /**
+     * 背景分頁釋放（Chromium 的 tab discarding）：同時活著的 WebView 超過 keep 個，就把最久沒用的背景分頁釋放
+     * （上一頁紀錄與縮圖留著，切回來重新載入）。目前分頁、它的來源頁、還在檢查中的彈窗不動
+     */
+    private fun discardBeyond(keep: Int) {
+        val cur = current
+        val candidates = tabs.filter { it.live && it != cur && it != cur?.opener && !it.popupCheck && !it.isBlank }
+            .sortedBy { it.lastUsed }
+        // 剛選到的分頁可能還沒建立 WebView（新分頁、待載入的分頁），馬上就會建：一起算
+        val live = tabs.count { it.live || it == cur }
+        val n = (live - keep).coerceAtMost(candidates.size)
+        if (n <= 0) return
+        candidates.take(n).forEach { it.discard() }
+        com.liquid.browser.BugLog.event("memory", "釋放 $n 個背景分頁（活著 $live → ${live - n}）")
+    }
+
+    /** 系統要求釋放記憶體（MainActivity.onTrimMemory）：先清返回用截圖，吃緊時釋放所有背景分頁 */
+    @Suppress("DEPRECATION")
+    fun trimMemory(level: Int) {
+        tabs.filter { it != current }.forEach { it.trimShots() }
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW && level < android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN ||
+            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_MODERATE
+        ) discardBeyond(1)
     }
 
     /** 同模式下相鄰的分頁（dir = -1 左、+1 右），沒有則為 null。 */
@@ -450,8 +483,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         val i = siblings.indexOf(tab)
         tabs.remove(tab)
         tabs.forEach { if (it.opener == tab) it.opener = null }
-        (tab.webView.parent as? ViewGroup)?.removeView(tab.webView)
-        tab.webView.destroy()
+        tab.destroyWebView()
         permissionQueue.filter { it.tab == tab }.forEach { permissionQueue.remove(it); it.result(false) }
         pruneSitePermissions()
         val left = siblings - tab
@@ -485,10 +517,17 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
                 org.json.JSONObject().put("url", t.url).put("title", t.title).put("used", t.lastUsed)
                     .apply { t.historyState()?.let(::bundleToB64)?.let { put("history", it) } }
             }))
-        runCatching { sessionFile.writeText(json.toString()) }
+        // 寫檔在背景執行緒（20 個分頁的上一頁紀錄可達數 MB，以前在主執行緒同步寫）；先寫暫存檔再改名，
+        // 寫到一半被系統結束也不會留下壞掉的 session.json
+        val text = json.toString()
         // 總覽卡片的縮圖也存起來（JPEG，背景執行緒壓縮），還原後卡片不會一片空白
         val thumbs = list.map { it.thumbnail?.asAndroidBitmap() }
         viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val tmp = java.io.File(sessionFile.path + ".tmp")
+                tmp.writeText(text)
+                if (!tmp.renameTo(sessionFile)) { sessionFile.delete(); tmp.renameTo(sessionFile) }
+            }
             thumbDir.deleteRecursively()
             thumbDir.mkdirs()
             thumbs.forEachIndexed { i, b ->
@@ -786,8 +825,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
             if (at < 0) return@launch
             val fresh = Tab(nextId++, tab.incognito, webContext, this@BrowserViewModel, settings.value.desktopByDefault, settings.value.identifyAsIPhone)
             tabs[at] = fresh
-            (tab.webView.parent as? ViewGroup)?.removeView(tab.webView)
-            runCatching { tab.webView.destroy() }
+            tab.destroyWebView()
             // 保留標題、縮圖與來源頁；其他分頁指向舊分頁的來源頁改指向新的
             fresh.thumbnail = tab.thumbnail
             fresh.opener = tab.opener
@@ -954,9 +992,9 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     override fun onTranslateBatch(tab: Tab, id: Int, texts: List<String>) {
         viewModelScope.launch {
             translateTexts(tab, texts).onSuccess { tr ->
-                tab.webView.evaluateJavascript("window.__lqTr&&window.__lqTr.apply($id, ${org.json.JSONArray(tr)});", null)
+                tab.eval("window.__lqTr&&window.__lqTr.apply($id, ${org.json.JSONArray(tr)});")
             }.onFailure { e ->
-                tab.webView.evaluateJavascript("window.__lqTr&&window.__lqTr.fail($id);", null)
+                tab.eval("window.__lqTr&&window.__lqTr.fail($id);")
                 showToast(t("翻譯失敗：%1\$s", e.message))
             }
         }
@@ -965,9 +1003,9 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     override fun onSubtitleBatch(tab: Tab, id: Int, texts: List<String>) {
         viewModelScope.launch {
             translateTexts(tab, texts).onSuccess { tr ->
-                tab.webView.evaluateJavascript("window.__lqYt&&window.__lqYt.apply($id, ${org.json.JSONArray(tr)});", null)
+                tab.eval("window.__lqYt&&window.__lqYt.apply($id, ${org.json.JSONArray(tr)});")
             }.onFailure { e ->
-                tab.webView.evaluateJavascript("window.__lqYt&&window.__lqYt.fail($id);", null)
+                tab.eval("window.__lqYt&&window.__lqYt.fail($id);")
                 com.liquid.browser.BugLog.event("translate", "字幕翻譯失敗：${e.message}")
                 if (tab == current) showToast(t("翻譯失敗：%1\$s", e.message))
             }
@@ -1118,7 +1156,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
             CookieManager.getInstance().removeAllCookies(null)
             WebStorage.getInstance().deleteAllData()
         }
-        if (cache) tabs.firstOrNull()?.webView?.clearCache(true)
+        if (cache) (current ?: tabs.firstOrNull())?.webView?.clearCache(true)
         showToast(t("已清除瀏覽資料"))
     }
 
@@ -1140,7 +1178,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     override fun onCleared() {
         DownloadEngine.videoOpener = null
         player?.release()
-        tabs.forEach { it.webView.destroy() }
+        tabs.forEach { it.destroyWebView() }
     }
 }
 
@@ -1154,6 +1192,9 @@ private val DEFAULT_SITES = listOf(
     Visit("https://www.bbc.com", "BBC"),
     Visit("https://maps.google.com", "Maps"),
 )
+
+/** 同時保留 WebView 的分頁數上限（每個約 20～80MB），超過的背景分頁釋放 */
+private const val MAX_LIVE_TABS = 6
 
 /** 彈出視窗新分頁在第一個網址出現前的佔位網址 */
 const val POPUP_PENDING = "about:blank"
