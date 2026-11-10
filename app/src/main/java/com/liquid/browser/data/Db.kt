@@ -65,9 +65,6 @@ data class PlaybackPosition(
     val updatedAt: Long,
 )
 
-@Immutable
-data class FrequentSite(val host: String, val url: String, val title: String, val visits: Int)
-
 @Dao
 interface BookmarkDao {
     @Query("SELECT * FROM bookmarks WHERE (parentId IS :parentId) ORDER BY isFolder DESC, position, id")
@@ -109,12 +106,6 @@ interface HistoryDao {
 
     @Query("SELECT * FROM history WHERE title LIKE '%' || :q || '%' OR url LIKE '%' || :q || '%' GROUP BY url ORDER BY MAX(visitedAt) DESC LIMIT :limit")
     suspend fun match(q: String, limit: Int = 4): List<HistoryEntry>
-
-    @Query(
-        "SELECT host, url, title, COUNT(*) AS visits FROM history WHERE visitedAt > :since " +
-            "GROUP BY host ORDER BY visits DESC LIMIT :limit"
-    )
-    fun frequent(since: Long, limit: Int = 8): Flow<List<FrequentSite>>
 
     @Query("DELETE FROM history WHERE id = :id")
     suspend fun delete(id: Long)

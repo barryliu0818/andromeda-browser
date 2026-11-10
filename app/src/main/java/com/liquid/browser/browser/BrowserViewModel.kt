@@ -356,10 +356,6 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         .map { list -> list.associate { it.host to it.iconUrl } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
-    /** 近 30 天最常造訪的網站 */
-    val frequent = db.history().frequent(System.currentTimeMillis() - 30L * 24 * 3600 * 1000)
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-
     init {
         SitePermissionStore.init(app)
         // 下載項目裡的影片用內建播放器開（本機檔案，不帶 Referer／Cookie）
