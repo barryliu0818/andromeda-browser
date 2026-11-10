@@ -64,6 +64,8 @@ android {
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+            // 手機都是 arm64（內建核心也只有 arm64）：x86_64 的原生程式庫（3MB）只給模擬器，加 -Px86 才打包
+            ndk { abiFilters += if (providers.gradleProperty("x86").isPresent) listOf("arm64-v8a", "x86_64") else listOf("arm64-v8a") }
         }
     }
 
