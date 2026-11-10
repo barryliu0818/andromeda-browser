@@ -405,6 +405,11 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         viewModelScope.launch {
             settings.map { it.blockThirdPartyCookies }.distinctUntilChanged().collect { block -> tabs.forEach { it.setThirdPartyCookies(!block) } }
         }
+        // 歷史紀錄上限：開 App 一會兒後在背景刪掉一年前的、只留最新 5 萬筆
+        viewModelScope.launch {
+            delay(15_000)
+            runCatching { db.history().prune(System.currentTimeMillis() - 365L * 24 * 3600 * 1000, 50_000) }
+        }
         // 擋廣告總開關或網站例外改變：各分頁重算「這一頁要不要擋」
         viewModelScope.launch {
             settings.map { it.adBlock to it.adAllow }.distinctUntilChanged().drop(1).collect { tabs.forEach { it.refreshBlocking() } }
@@ -1100,7 +1105,12 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
                     (if (engine.isFree) freeGate else translateGate).withPermit {
                         runCatching { Translator.translate(part, engine, s.translateKeys[engine.keyOwner].orEmpty(), s.translateModels[engine].orEmpty(), target, onLine) }
                             .recoverCatching { e ->
-                                if (engine == TranslateEngine.Tencent || e is kotlinx.coroutines.CancellationException) throw e
+                                if (e is kotlinx.coroutines.CancellationException) throw e
+                                // 拉丁文、印地文的免費翻譯只有 Google（騰訊不支援），中國大陸連不上：有百煉金鑰就改用 AI 翻譯
+                                val aiKey = s.translateKeys[TranslateEngine.Qwen].orEmpty()
+                                if (engine.isFree && target.tencent == null && aiKey.isNotBlank())
+                                    return@recoverCatching Translator.translate(part, TranslateEngine.Qwen, aiKey, s.translateModels[TranslateEngine.Qwen].orEmpty(), target, onLine)
+                                if (engine == TranslateEngine.Tencent) throw e
                                 com.liquid.browser.BugLog.event("translate", "$engine 失敗，改用免費翻譯：${e.message}")
                                 if (aiFailedFor != tab) { aiFailedFor = tab; showToast(t("%1\$s，改用免費翻譯", e.message)) }
                                 Translator.translate(part, TranslateEngine.Tencent, "", "", target)

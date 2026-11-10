@@ -47,16 +47,18 @@ private val PanelShape = RoundedCornerShape(Dimens.MenuRadius)
 @Composable
 fun Suggestions(vm: BrowserViewModel, q: String, haze: HazeState, tone: Tone, onPick: (String) -> Unit) {
     // 搜尋引擎建議：背景執行緒取得，150ms 防抖
-    val remote by produceState(emptyList<String>(), q) {
+    // 建議來自使用者選的搜尋引擎；打下一個字時上一個請求連線直接取消（OkHttp）
+    val engine = vm.settings.collectAsState().value.engine
+    val remote by produceState(emptyList<String>(), q, engine) {
         value = emptyList()
         if (q.isBlank() || q.startsWith("http")) return@produceState
         delay(150)
-        value = withContext(Dispatchers.IO) {
-            runCatching {
-                val json = URL("https://suggestqueries.google.com/complete/search?client=firefox&q=" + Uri.encode(q)).readText()
-                JSONArray(json).getJSONArray(1).let { a -> List(min(a.length(), 4)) { a.getString(it) } }
-            }.getOrDefault(emptyList())
-        }
+        value = try {
+            val req = okhttp3.Request.Builder().url(engine.suggest + Uri.encode(q)).header("User-Agent", com.liquid.browser.browser.IPHONE_SAFARI_UA).build()
+            com.liquid.browser.core.Http.exec(req) { r ->
+                JSONArray(r.body.string()).getJSONArray(1).let { a -> List(min(a.length(), 4)) { a.getString(it) } }
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { emptyList() }
     }
     // 書籤與歷史紀錄：Room 查詢（suspend，自動在背景執行緒）
     val local by produceState(emptyList<Visit>(), q) {

@@ -112,6 +112,10 @@ interface HistoryDao {
 
     @Query("DELETE FROM history WHERE visitedAt >= :since")
     suspend fun deleteSince(since: Long)
+
+    /** 清掉早於 before 的紀錄，並只留最新的 keep 筆（網址列建議是全表 LIKE 搜尋，資料無限長大會越打越慢） */
+    @Query("DELETE FROM history WHERE visitedAt < :before OR id NOT IN (SELECT id FROM history ORDER BY visitedAt DESC LIMIT :keep)")
+    suspend fun prune(before: Long, keep: Int)
 }
 
 @Dao

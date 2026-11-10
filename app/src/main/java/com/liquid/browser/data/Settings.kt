@@ -15,14 +15,17 @@ import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
-/** 搜尋引擎：名稱、搜尋網址前綴。 */
-enum class SearchEngine(val label: String, val prefix: String) {
-    Google("Google", "https://www.google.com/search?q="),
-    Bing("Bing", "https://www.bing.com/search?q="),
-    DuckDuckGo("DuckDuckGo", "https://duckduckgo.com/?q="),
-    Yandex("Yandex", "https://yandex.com/search/?text="),
-    Baidu("百度", "https://www.baidu.com/s?wd="),
-    Yahoo("Yahoo", "https://search.yahoo.com/search?p="),
+/**
+ * 搜尋引擎：名稱、搜尋網址前綴、搜尋建議網址前綴（Chromium 內建引擎清單的 suggest_url，回傳都是 OpenSearch 格式
+ * [字詞, [建議…]]）。建議跟著使用者選的引擎走：以前一律問 Google，中國大陸連不上就沒有建議
+ */
+enum class SearchEngine(val label: String, val prefix: String, val suggest: String) {
+    Google("Google", "https://www.google.com/search?q=", "https://suggestqueries.google.com/complete/search?client=firefox&q="),
+    Bing("Bing", "https://www.bing.com/search?q=", "https://api.bing.com/osjson.aspx?query="),
+    DuckDuckGo("DuckDuckGo", "https://duckduckgo.com/?q=", "https://duckduckgo.com/ac/?type=list&q="),
+    Yandex("Yandex", "https://yandex.com/search/?text=", "https://suggest.yandex.com/suggest-ff.cgi?part="),
+    Baidu("百度", "https://www.baidu.com/s?wd=", "https://www.baidu.com/su?action=opensearch&ie=utf-8&wd="),
+    Yahoo("Yahoo", "https://search.yahoo.com/search?p=", "https://search.yahoo.com/sugg/os?output=fxjson&command="),
 }
 
 @Immutable
