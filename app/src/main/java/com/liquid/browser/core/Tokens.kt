@@ -22,10 +22,11 @@ import androidx.compose.ui.unit.dp
  * 調手感只改這個檔案。
  */
 /**
- * 動畫規格：Material 3 Expressive 動態系統（Compose MotionScheme.expressive() 的彈簧參數）。
- *  - 空間（位移、大小、面板）：預設 0.8／380（微微回彈）、快速 0.6／800、慢速 0.8／200；
- *  - 效果（透明度、顏色）：預設 1.0／1600、快速 1.0／3800（不回彈）。
- * 系統「移除動畫」開啟時一律立即完成。調手感只改這裡。
+ * 動畫規格（iOS 的手感）：
+ *  - 跟手、可被打斷的位移（網址列收合、按壓、面板放開後歸位）：臨界阻尼彈簧，以 response（約等於完成時間）指定；
+ *  - 開關與變形（選單、面板、分頁總覽）：Apple sheet 曲線 [SheetEasing]，固定時長；
+ *  - 淡入淡出、顏色：iOS easeInOut。
+ * 系統「移除動畫」開啟時一律立即完成。調手感只改這裡（選單、面板、總覽都從這裡取曲線與時長）。
  */
 object Motion {
     const val ShortMs = 200
@@ -51,7 +52,14 @@ object Motion {
     private val IosEaseInOut = androidx.compose.animation.core.CubicBezierEasing(0.42f, 0f, 0.58f, 1f)
     // 開關（選單、面板、總覽）：Apple 的 sheet 曲線（iOS 呈現／關閉頁面用的那條）。一開始就是最快的速度、再慢慢停住，
     // 點下去畫面立刻動。彈簧從靜止起步，前 50ms 只走 13%，會感覺「延遲」，所以開關不用彈簧
-    private val AppleSheet = androidx.compose.animation.core.CubicBezierEasing(0.32f, 0.72f, 0f, 1f)
+    // 選單變形成面板、面板縮回選單、選單內推入下一層也都用這條（以前選單與變形另外用 Material emphasized 曲線，兩邊節奏不一樣）
+    val SheetEasing = androidx.compose.animation.core.CubicBezierEasing(0.32f, 0.72f, 0f, 1f)
+    private val AppleSheet = SheetEasing
+
+    /** 選單從按鈕變形展開、面板從選單變形長成（進場）；縮回（退場）比較快；選單內推入下一層 */
+    const val MorphOpenMs = 380
+    const val MorphCloseMs = 280
+    const val PushMs = 350
 
     /** 一般 UI（跟手的位移：彈簧 response 0.3s，中途打斷保留速度） */
     fun <T> standard(): FiniteAnimationSpec<T> = if (reduced) snap() else iosSpring(0.3f)
@@ -71,7 +79,13 @@ object Motion {
     /** 按下：要立即回饋（彈簧 response 0.12s） */
     fun <T> pressIn(): FiniteAnimationSpec<T> = if (reduced) snap() else iosSpring(0.12f)
 
-    /** 淡入淡出、顏色（iOS easeInOut） */
+    /** 放開：快速彈回（彈簧 response 0.25s）。以前用 400ms 的開關曲線，連點時按鈕回彈跟不上、感覺黏住 */
+    fun <T> pressOut(): FiniteAnimationSpec<T> = if (reduced) snap() else iosSpring(0.25f)
+
+    /**
+     * 淡入淡出、顏色（iOS easeInOut）。注意：實際時長是 ms × 1.25（iOS 的淡入淡出比 Material 慢一點；
+     * 各處傳入的仍是 Material 的時長，這裡統一放慢）
+     */
     fun <T> timed(ms: Int = MediumMs): FiniteAnimationSpec<T> = if (reduced) snap() else androidx.compose.animation.core.tween((ms * 1.25f).toInt(), easing = IosEaseInOut)
 }
 

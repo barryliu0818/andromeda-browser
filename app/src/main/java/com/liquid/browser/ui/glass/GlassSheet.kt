@@ -91,8 +91,8 @@ class SheetState {
 }
 
 private val SheetShape = RoundedCornerShape(topStart = Dimens.MenuRadius, topEnd = Dimens.MenuRadius)
-// Container Transform：跟選單同一條 emphasized 曲線；開 380ms、縮回 280ms
-private val Emphasized = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
+// Container Transform：跟選單同一條曲線與時長（Motion.SheetEasing、MorphOpenMs／MorphCloseMs）
+private val Emphasized = com.liquid.browser.core.Motion.SheetEasing
 
 /** 圓角矩形外框（範圍、上緣圓角、下緣圓角）：變形時每幀換一個，只影響繪製 */
 private class MorphShape(val r: Rect, val top: Float, val bottom: Float) : Shape {
@@ -116,12 +116,14 @@ fun GlassSheetHost(state: SheetState, haze: HazeState, tone: Tone) {
     val reduce = Motion.reduced
     // 變形的起點（開啟：選單面板；關閉：打開選單的按鈕）；在繪製階段讀
     var start by remember(content) { mutableStateOf(state.from) }
+    // 手指往下甩關掉面板時的速度（每秒幾個面板高）：收起動畫接著這個速度
+    val fling = remember(content) { floatArrayOf(0f) }
     state.anim = hidden
     LaunchedEffect(content, state.open) {
         if (state.open) {
             // 先讓內容在畫面外完成第一次組合與排版，下一幀才開始滑入：首次開啟時排版不會吃掉動畫的幀
             androidx.compose.runtime.withFrameNanos { }
-            if (state.from != null) morph.animateTo(1f, tween(if (reduce) 200 else 380, easing = LinearEasing))
+            if (state.from != null) morph.animateTo(1f, tween(if (reduce) 200 else Motion.MorphOpenMs, easing = LinearEasing))
             else hidden.animateTo(0f, Motion.glass())
         }
         else if (state.from != null && hidden.value < 0.01f) {
@@ -129,7 +131,7 @@ fun GlassSheetHost(state: SheetState, haze: HazeState, tone: Tone) {
             // 在 k=1 時外形與起點無關，關閉前換起點不會跳
             state.to?.let { start = it }
             try {
-                morph.animateTo(0f, tween(if (reduce) 160 else 280, easing = LinearEasing))
+                morph.animateTo(0f, tween(if (reduce) 160 else Motion.MorphCloseMs, easing = LinearEasing))
             } catch (e: CancellationException) {
                 if (!isActive) throw e
             }
@@ -139,7 +141,10 @@ fun GlassSheetHost(state: SheetState, haze: HazeState, tone: Tone) {
             // 收起動畫可能被拖曳的 snapTo 打斷（Animatable 會取消前一個動畫）：被打斷也要清掉，
             // 否則面板停在畫面外、透明遮罩仍蓋住整個畫面吃掉所有點擊
             try {
-                hidden.animateTo(1f, Motion.exit())
+                // 往下甩關掉的：接著手指的速度滑出去；按返回鍵、點遮罩關的：照一般退場曲線
+                val v = fling[0]
+                fling[0] = 0f
+                if (v > 0f) hidden.animateTo(1f, Motion.standard(), initialVelocity = v) else hidden.animateTo(1f, Motion.exit())
             } catch (e: CancellationException) {
                 if (!isActive) throw e
             }
@@ -154,11 +159,13 @@ fun GlassSheetHost(state: SheetState, haze: HazeState, tone: Tone) {
         val menuR = with(density) { 20.dp.toPx() }
         val dark = tone.content.luminance() > 0.5f
         val menuColor = if (dark) com.liquid.browser.core.Palette.CardDark else com.liquid.browser.core.Palette.CardLight
-        // 變形進度（emphasized）；移除動畫時不變形、只淡入淡出
+        // 變形進度（Apple sheet 曲線）；移除動畫時不變形、只淡入淡出
         val e = { if (reduce) 1f else Emphasized.transform(morph.value.coerceIn(0f, 1f)) }
+        // 手指放開：接著手指的速度用彈簧滑走或歸位（iOS 的做法）。以前一律用固定時長的曲線從零速度重新起步，
+        // 甩得再快面板也是同樣的速度，手感斷一下
         fun settle(velocity: Float) {
-            if (hidden.value > 0.3f || velocity > 1200f) state.dismiss()
-            else scope.launch { hidden.animateTo(0f, Motion.glass()) }
+            if (hidden.value > 0.3f || velocity > 1200f) { fling[0] = velocity / h; state.dismiss() }
+            else scope.launch { hidden.animateTo(0f, Motion.standard(), initialVelocity = velocity / h) }
         }
         val nested = remember(content, h) {
             object : NestedScrollConnection {
@@ -210,7 +217,8 @@ fun GlassSheetHost(state: SheetState, haze: HazeState, tone: Tone) {
         Box(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(with(density) { h.toDp() })
                 .graphicsLayer {
-                    translationY = hidden.value * h
+                    // 帶速度的彈簧歸位時可能略超過 0：不往上露出面板底下的縫
+                    translationY = hidden.value.coerceAtLeast(0f) * h
                     if (from != null && !reduce) {
                         // 容器範圍：選單面板（換成面板自己的座標）→ 整個面板
                         val k = e()

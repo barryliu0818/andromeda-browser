@@ -184,14 +184,6 @@ internal class BlurDialog(context: Context, parent: CompositionContext) : Dialog
     private var origin = Offset.Zero
     private var blurSet = false
 
-    /** 視窗外的點擊（需要 FLAG_WATCH_OUTSIDE_TOUCH）：系統 dim 開著時，視窗外的觸控不會傳到主畫面，改在這裡收 */
-    var onOutside: (() -> Unit)? = null
-
-    override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
-        if (event.actionMasked == android.view.MotionEvent.ACTION_OUTSIDE) { onOutside?.invoke(); return true }
-        return super.onTouchEvent(event)
-    }
-
     init {
         setContentView(view)
         setCancelable(false)
@@ -229,8 +221,6 @@ internal class BlurDialog(context: Context, parent: CompositionContext) : Dialog
         val w = window ?: return
         w.decorView.visibility = android.view.View.GONE
         w.decorView.translationY = 0f
-        w.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH)
-        onOutside = null
         rect = Rect.Zero
         val lp = w.attributes
         if (lp.width != 1 || lp.height != 1) { lp.width = 1; lp.height = 1; w.attributes = lp }
@@ -288,14 +278,9 @@ internal fun BlurBoxWindow(
     onLayout: ((() -> Unit) -> Unit),
     onReady: () -> Unit,
     shiftY: (() -> Float)? = null,
-    dimBehind: (() -> Float)? = null,
-    onOutside: (() -> Unit)? = null,
-    /** 整個視窗（含背後的模糊）的不透明度：關閉時玻璃跟著淡出，不會停在畫面上再突然消失 */
-    windowAlpha: (() -> Float)? = null,
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
-    val latestOutside by rememberUpdatedState(onOutside)
     val parent = rememberCompositionContext()
     val lifecycle = LocalLifecycleOwner.current
     val saved = LocalSavedStateRegistryOwner.current
@@ -310,12 +295,6 @@ internal fun BlurBoxWindow(
         win.view.setContent { win.Content { latest() } }
         // 位移在第一次顯示前就套上，不會先在終點閃一幀
         shiftY?.let { win.decor.translationY = it() }
-        // 背後變暗交給系統合成器（視窗的 dim）：主畫面在動畫期間完全不必重畫
-        dimBehind?.let { win.window?.apply { addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND); setDimAmount(it()) } }
-        if (onOutside != null) {
-            win.window?.addFlags(WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH)
-            win.onOutside = { latestOutside?.invoke() }
-        }
         if (!win.isShowing) win.show()
         val push = { val s = size(); if (s != IntSize.Zero) win.update(origin(), Rect(0f, 0f, s.width.toFloat(), s.height.toFloat()), s, blurPx, cornerPx, latestHidden) }
         onLayout(push)
@@ -328,19 +307,6 @@ internal fun BlurBoxWindow(
     // 平移整個視窗內容（RenderThread 層級，不經 WindowManager）；模糊區域由系統跟著畫面位置更新
     if (shiftY != null) androidx.compose.runtime.LaunchedEffect(win) {
         androidx.compose.runtime.snapshotFlow { shiftY() }.collect { win.decor.translationY = it }
-    }
-    if (windowAlpha != null) androidx.compose.runtime.LaunchedEffect(win) {
-        try {
-            androidx.compose.runtime.snapshotFlow { windowAlpha() }.collect { a ->
-                win.window?.let { w -> val lp = w.attributes; if (lp.alpha != a) { lp.alpha = a.coerceIn(0f, 1f); w.attributes = lp } }
-            }
-        } finally {
-            // 還給池子前恢復不透明，下一個使用者不會拿到半透明的視窗
-            win.window?.let { w -> val lp = w.attributes; if (lp.alpha != 1f) { lp.alpha = 1f; w.attributes = lp } }
-        }
-    }
-    if (dimBehind != null) androidx.compose.runtime.LaunchedEffect(win) {
-        androidx.compose.runtime.snapshotFlow { dimBehind() }.collect { win.window?.setDimAmount(it.coerceIn(0f, 1f)) }
     }
     androidx.compose.runtime.SideEffect { val s = size(); if (s != IntSize.Zero) win.update(origin(), Rect(0f, 0f, s.width.toFloat(), s.height.toFloat()), s, blurPx, cornerPx, hidden) }
 }

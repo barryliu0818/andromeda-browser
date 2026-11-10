@@ -137,13 +137,12 @@ class MenuState {
 
 /** 選單面板的最終外形：20dp 圓角的卡片 */
 private val PanelRadius = 20.dp
-// Material 3 emphasized easing：開啟沿曲線正向播放；關閉沿同一條曲線反向播放（起步慢、離開快）
-private val Emphasized = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
-private const val OpenMs = 380
-private const val CloseMs = 280
-// 推入／推出（選單內換層、推到選單外的下一層）：iOS 導覽 push 的曲線
-private val PushEasing = CubicBezierEasing(0.32f, 0.72f, 0f, 1f)
-private const val PushMs = 350
+// 變形、推入都用 Apple sheet 曲線（跟面板、分頁總覽同一條，見 Motion）：開啟沿曲線正向播放；關閉沿同一條曲線反向播放
+private val Emphasized = com.liquid.browser.core.Motion.SheetEasing
+private const val OpenMs = com.liquid.browser.core.Motion.MorphOpenMs
+private const val CloseMs = com.liquid.browser.core.Motion.MorphCloseMs
+private val PushEasing = com.liquid.browser.core.Motion.SheetEasing
+private const val PushMs = com.liquid.browser.core.Motion.PushMs
 
 /** 版面計算的暫存（排版階段寫、子元件讀）；內容高度是狀態：換層時高度變了，外層容器要跟著重新排版 */
 private class MenuGeometry {
@@ -159,7 +158,7 @@ private class MenuGeometry {
  *  - 位置、寬高、圓角（按鈕原本的形狀 → 20dp）、背景色（按鈕的底色 → 白色卡片，深色模式為深灰卡片）同時過渡
  *  - 以容器尺寸變化實作：內容一次排成最終寬度、留在最終位置，容器的裁切範圍長大把它露出來，不縮放內容、文字不變形
  *  - 時序：按鈕圖示在前 30% 淡出；選單項目在 40% 後依序淡入，每項間隔 40ms、帶 8dp 位移；背景遮罩同步淡入到 40%
- *  - 開啟 380ms（emphasized easing）；關閉 280ms 反向播放，面板縮回按鈕原位置與原形狀
+ *  - 開啟 380ms、關閉 280ms（Apple sheet 曲線，關閉反向播放），面板縮回按鈕原位置與原形狀
  *  - 展開方向朝螢幕空間較大處（按鈕在右下就往左上展開）
  *  - 二、三級採推入式切換（面板內容左右推、面板高度跟著變），不重播變形
  *  - 系統「移除動畫」開啟時改為單純淡入淡出
@@ -200,7 +199,7 @@ fun GlassMenuHost(state: MenuState, haze: HazeState, tone: Tone) {
             state.clear()
         }
     }
-    // 變形進度（套用 emphasized easing）；移除動畫時固定在面板外形，只淡入淡出
+    // 變形進度（套用 Apple sheet 曲線）；移除動畫時固定在面板外形，只淡入淡出
     val e = { if (reduce) 1f else Emphasized.transform(t.value.coerceIn(0f, 1f)) }
     val density = LocalDensity.current
     val margin = with(density) { 12.dp.toPx() }
