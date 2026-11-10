@@ -216,9 +216,10 @@ object AdBlocker {
 }
 
 /** 近似的「主網域」（eTLD+1），判斷跳轉是否換了網站：example.co.uk、example.com.tw 這類兩層後綴也處理 */
+private val SECOND_LEVEL = setOf("co", "com", "net", "org", "gov", "edu", "ac", "or", "ne", "go")
+
 fun baseDomain(host: String): String {
     val parts = host.lowercase().removePrefix("www.").split('.')
     if (parts.size <= 2) return parts.joinToString(".")
-    val secondLevel = setOf("co", "com", "net", "org", "gov", "edu", "ac", "or", "ne", "go")
-    return if (parts[parts.size - 2] in secondLevel && parts.last().length == 2) parts.takeLast(3).joinToString(".") else parts.takeLast(2).joinToString(".")
+    return if (parts[parts.size - 2] in SECOND_LEVEL && parts.last().length == 2) parts.takeLast(3).joinToString(".") else parts.takeLast(2).joinToString(".")
 }

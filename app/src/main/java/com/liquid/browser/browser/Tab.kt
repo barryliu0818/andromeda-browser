@@ -335,11 +335,20 @@ class Tab(
     /** 阻擋已知追蹤器：無痕分頁一律阻擋（Safari 私密瀏覽），其他依設定與網站例外 */
     private fun blocksTrackers(pageHost: String) = incognito || listener.adBlockFor(pageHost)
 
+    /**
+     * 這一頁要不要擋廣告：換頁時（onPageStarted）、設定或網站例外改變時（[refreshBlocking]）算一次，
+     * 子資源請求（網路執行緒，一頁上百個）直接讀，不必每個請求都重算網站例外
+     */
+    @Volatile private var blockPage = false
+
+    fun refreshBlocking() { blockPage = blocksTrackers(pageHost) }
+
     /** 第三方 Cookie（嵌在別的網站裡的追蹤 Cookie）：預設封鎖；無痕分頁一律封鎖 */
     fun setThirdPartyCookies(allow: Boolean) =
         android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(webView, allow && !incognito)
 
     init {
+        refreshBlocking()
         setThirdPartyCookies(listener.allowThirdPartyCookies())
         // Compose AndroidView 預設給 WRAP_CONTENT：WebView 會把版面高度當成 0（高度隨內容延展），
         // 導致網頁的 100vh／dvh 變成 0（例如 Google 首頁整個擠在上方）。明確指定 MATCH_PARENT。
@@ -441,7 +450,7 @@ class Tab(
                 // 廣告／追蹤阻擋：子資源符合清單就回空內容（Brave 引擎完整比對；沒有引擎時只比對網域）
                 if (!request.isForMainFrame) {
                     val page = pageHost
-                    if (blocksTrackers(page) && AdBlocker.blocksRequest(u, request.url.host.orEmpty(), page, AdBlocker.resourceType(request))) {
+                    if (blockPage && AdBlocker.blocksRequest(u, request.url.host.orEmpty(), page, AdBlocker.resourceType(request))) {
                         main.post { blockedCount++ }
                         return AdBlocker.emptyResponse()
                     }
@@ -471,6 +480,7 @@ class Tab(
                 media.clear()
                 blockedCount = 0
                 pageHost = Uri.parse(u).host.orEmpty()
+                refreshBlocking()
                 // 沒經過 shouldOverrideUrlLoading 的導覽（上一頁／下一頁、伺服器轉址）身分不對：切換後重新載入
                 if (switchIdentityFor(u)) {
                     view.stopLoading()

@@ -385,6 +385,10 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         viewModelScope.launch {
             settings.map { it.blockThirdPartyCookies }.distinctUntilChanged().collect { block -> tabs.forEach { it.setThirdPartyCookies(!block) } }
         }
+        // 擋廣告總開關或網站例外改變：各分頁重算「這一頁要不要擋」
+        viewModelScope.launch {
+            settings.map { it.adBlock to it.adAllow }.distinctUntilChanged().drop(1).collect { tabs.forEach { it.refreshBlocking() } }
+        }
         // 「Brave 防追蹤」開關改變時重新註冊防指紋腳本
         viewModelScope.launch {
             settings.map { it.shields }.distinctUntilChanged().drop(1).collect { on -> tabs.forEach { it.applyShields(on) } }
