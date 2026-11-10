@@ -67,7 +67,9 @@ object Translator {
 
     /** 送給模型的內容：一段一行，段內換行改成空白（網頁文字的換行本來就顯示成空白） */
     fun encodeLines(texts: List<String>): String =
-        texts.withIndex().joinToString("\n") { (i, s) -> "$i|" + s.replace(Regex("\\s+"), " ").trim() }
+        texts.withIndex().joinToString("\n") { (i, s) -> "$i|" + s.replace(spaces, " ").trim() }
+
+    private val spaces = Regex("\\s+")
 
     /** 解析模型回的「編號|譯文」；沒對到的編號為 null（之後由免費引擎補翻） */
     fun parseLines(content: String, size: Int): List<String?> {

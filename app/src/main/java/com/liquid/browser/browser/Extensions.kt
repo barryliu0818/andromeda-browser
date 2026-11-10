@@ -57,16 +57,21 @@ object Extensions {
         val path = u.path.orEmpty()
         return when {
             path.endsWith(".user.js") || path.endsWith(".xpi") || path.endsWith(".crx") -> url
-            host == "addons.mozilla.org" -> Regex("/addon/([^/]+)").find(path)?.let { "amo:" + it.groupValues[1] }
+            host == "addons.mozilla.org" -> AMO_ID.find(path)?.let { "amo:" + it.groupValues[1] }
             host == "chromewebstore.google.com" || (host == "chrome.google.com" && path.startsWith("/webstore")) ->
-                Regex("/([a-p]{32})(/|$)").find(path)?.let {
+                CWS_ID.find(path)?.let {
                     "https://clients2.google.com/service/update2/crx?response=redirect&prodversion=159.0&acceptformat=crx2,crx3&x=id%3D${it.groupValues[1]}%26uc"
                 }
             host.endsWith("greasyfork.org") || host.endsWith("sleazyfork.org") ->
-                Regex("/scripts/(\\d+)").find(path)?.let { "https://$host/scripts/${it.groupValues[1]}/code/script.user.js" }
+                GREASY_ID.find(path)?.let { "https://$host/scripts/${it.groupValues[1]}/code/script.user.js" }
             else -> null
         }
     }
+
+    // packageUrl 每次換頁都會跑：正規表示式只編譯一次
+    private val AMO_ID = Regex("/addon/([^/]+)")
+    private val CWS_ID = Regex("/([a-p]{32})(/|$)")
+    private val GREASY_ID = Regex("/scripts/(\\d+)")
 
     /** 下載並安裝（背景執行緒）。失敗丟出例外，訊息可直接顯示給使用者 */
     fun install(url: String): Ext {

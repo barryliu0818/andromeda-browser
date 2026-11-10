@@ -320,6 +320,8 @@ class Tab(
 
     /** 這個頁面已阻擋的廣告／追蹤請求數 */
     var blockedCount by androidx.compose.runtime.mutableIntStateOf(0)
+    /** 網路執行緒擋下、還沒加進 [blockedCount] 的數量 */
+    private val blockedPending = java.util.concurrent.atomic.AtomicInteger()
 
     /** 目前頁面的網域（網路執行緒也會讀，所以用 volatile 欄位而非 Compose 狀態） */
     @Volatile var pageHost: String = ""
@@ -358,7 +360,8 @@ class Tab(
             ProfileStore.getInstance().getOrCreateProfile(INCOGNITO_PROFILE)
             WebViewCompat.setProfile(webView, INCOGNITO_PROFILE)
         }
-        // 返回不重新載入（往返快取）：離開的網頁整頁留在記憶體，返回時直接還原（含捲動位置、已翻好的譯文）；
+        // 返回不重新載入（往返快取）：離開的網頁整頁留在記憶體，返回時直接還原（含捲動位置、已翻好的譯文，
+        // 被廣告帶走再回來時廣告也不會重新出現）；
         // 最多 3 頁、10 分鐘（每頁約數 MB～數十 MB，太多會吃記憶體）
         if (WebViewFeature.isFeatureSupported(WebViewFeature.BACK_FORWARD_CACHE)) {
             @Suppress("RestrictedApi", "UnsafeOptInUsageError")
@@ -388,10 +391,6 @@ class Tab(
             WebSettingsCompat.setRequestedWithHeaderOriginAllowList(webView.settings, emptySet())
         }
         applyIdentity(reload = false)
-        // 往返快取：返回上一頁時從記憶體直接還原（不重新載入，被廣告帶走再回來時廣告也不會重新出現）
-        if (WebViewFeature.isFeatureSupported(WebViewFeature.BACK_FORWARD_CACHE)) {
-            runCatching { WebSettingsCompat.setBackForwardCacheEnabled(webView.settings, true) }
-        }
         // Google 安全瀏覽：詐騙、惡意軟體網站會先顯示警告頁
         if (WebViewFeature.isFeatureSupported(WebViewFeature.SAFE_BROWSING_ENABLE)) WebSettingsCompat.setSafeBrowsingEnabled(webView.settings, true)
         // 頁尾留白：在每個頁面內容最後加一段與浮動控制列等高的空白，頁尾才能捲到網址列上方
@@ -451,7 +450,8 @@ class Tab(
                 if (!request.isForMainFrame) {
                     val page = pageHost
                     if (blockPage && AdBlocker.blocksRequest(u, request.url.host.orEmpty(), page, AdBlocker.resourceType(request))) {
-                        main.post { blockedCount++ }
+                        // 廣告多的頁面一秒擋幾十個：累計起來每 100ms 更新一次計數（以前每擋一個就丟一個工作給主執行緒）
+                        if (blockedPending.getAndIncrement() == 0) main.postDelayed({ blockedCount += blockedPending.getAndSet(0) }, 100)
                         return AdBlocker.emptyResponse()
                     }
                 }
@@ -479,6 +479,7 @@ class Tab(
                 pageStartedAt = android.os.SystemClock.uptimeMillis()
                 media.clear()
                 blockedCount = 0
+                blockedPending.set(0)
                 pageHost = Uri.parse(u).host.orEmpty()
                 refreshBlocking()
                 // 沒經過 shouldOverrideUrlLoading 的導覽（上一頁／下一頁、伺服器轉址）身分不對：切換後重新載入

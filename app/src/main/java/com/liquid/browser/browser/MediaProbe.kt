@@ -43,8 +43,8 @@ object MediaProbe {
         val variants = lines.mapIndexedNotNull { i, l ->
             if (!l.startsWith("#EXT-X-STREAM-INF")) return@mapIndexedNotNull null
             val next = lines.drop(i + 1).firstOrNull { it.isNotBlank() && !it.startsWith("#") } ?: return@mapIndexedNotNull null
-            val bw = Regex("[,:]BANDWIDTH=(\\d+)").find(l)?.groupValues?.get(1)?.toLongOrNull() ?: 0
-            val h = Regex("RESOLUTION=\\d+x(\\d+)").find(l)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            val bw = BANDWIDTH.find(l)?.groupValues?.get(1)?.toLongOrNull() ?: 0
+            val h = RESOLUTION.find(l)?.groupValues?.get(1)?.toIntOrNull() ?: 0
             Triple(URL(URL(url), next.trim()).toString(), h, bw)
         }
         val dur = variants.firstOrNull()?.let { runCatching { playlist(get(it.first, headers), it.first).first }.getOrNull() } ?: 0.0
@@ -85,8 +85,13 @@ object MediaProbe {
     /** 從網址判斷畫質：720p、1080P、_480.mp4、-2160- 這類 */
     fun guessHeight(url: String): Int {
         val u = url.substringBefore('?')
-        Regex("(\\d{3,4})[pP](?![a-zA-Z])").find(u)?.groupValues?.get(1)?.toIntOrNull()?.let { if (it in 144..4320) return it }
-        Regex("[_\\-/.](144|240|360|480|540|720|1080|1440|2160)(?=[_\\-/.])").find(u)?.groupValues?.get(1)?.toIntOrNull()?.let { return it }
+        HEIGHT_P.find(u)?.groupValues?.get(1)?.toIntOrNull()?.let { if (it in 144..4320) return it }
+        HEIGHT_NUM.find(u)?.groupValues?.get(1)?.toIntOrNull()?.let { return it }
         return 0
     }
+
+    private val BANDWIDTH = Regex("[,:]BANDWIDTH=(\\d+)")
+    private val RESOLUTION = Regex("RESOLUTION=\\d+x(\\d+)")
+    private val HEIGHT_P = Regex("(\\d{3,4})[pP](?![a-zA-Z])")
+    private val HEIGHT_NUM = Regex("[_\\-/.](144|240|360|480|540|720|1080|1440|2160)(?=[_\\-/.])")
 }

@@ -172,6 +172,7 @@ object AdBlocker {
         val block = HashSet<String>(lines.size)
         val allow = HashSet<String>()
         val rule = Regex("^(@@)?\\|\\|([a-z0-9.-]+)\\^(\\\$important)?$")
+        val bareDomain = Regex("^[a-z0-9.-]+\\.[a-z]{2,}$")
         for (raw in lines) {
             val line = raw.trim().lowercase()
             if (line.isEmpty() || line.startsWith("!") || line.startsWith("#")) continue
@@ -179,7 +180,7 @@ object AdBlocker {
             when {
                 m != null -> if (m.groupValues[1].isNotEmpty()) allow += m.groupValues[2] else block += m.groupValues[2]
                 // 內建清單：一行一個網域
-                Regex("^[a-z0-9.-]+\\.[a-z]{2,}$").matches(line) -> block += line
+                bareDomain.matches(line) -> block += line
             }
         }
         blocked = block

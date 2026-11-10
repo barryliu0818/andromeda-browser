@@ -579,13 +579,21 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         collapseTarget = null
         collapse = (collapse + dy / collapseDistance).coerceIn(0f, 1f)
         if (collapse == 1f) settled = true else if (collapse == 0f) settled = false
-        settleJob?.cancel()
+        // 捲動停下 120ms、手指也放開了才彈到定位。只用一個協程等（以前每個捲動事件都取消重開一個，一秒上百個）
+        lastScrollAt = android.os.SystemClock.uptimeMillis()
+        scrollTab = tab
+        if (settleJob?.isActive == true) return
         settleJob = viewModelScope.launch {
-            delay(120)
-            while (tab.touching) delay(50)
+            while (true) {
+                val wait = 120 - (android.os.SystemClock.uptimeMillis() - lastScrollAt)
+                if (wait <= 0 && scrollTab?.touching != true) break
+                delay(wait.coerceAtLeast(50))
+            }
             if (collapse > 0f && collapse < 1f) collapsed = collapse > 0.5f
         }
     }
+    private var lastScrollAt = 0L
+    private var scrollTab: Tab? = null
 
     /** 網址列狀態：true＝收合成小膠囊。設定時由 UI 以彈簧動畫把 [collapse] 帶到 0／1 */
     var collapsed: Boolean
@@ -762,7 +770,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
 
     private val translateScript: String by lazy { getApplication<Application>().assets.open("translate.js").bufferedReader().use { it.readText() } }
 
-    /** 同時送出的翻譯批次：AI 引擎 4 批、免費引擎 2 批（避免被限流） */
+    /** 同時送出的翻譯批次：AI 引擎 8 批、免費引擎 2 批（避免被限流） */
     private val translateGate = kotlinx.coroutines.sync.Semaphore(8)
     private val freeGate = kotlinx.coroutines.sync.Semaphore(2)
     /** AI 引擎失敗（金鑰錯誤、額度用完）後這個頁面改用免費引擎，並只提示一次 */

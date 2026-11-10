@@ -1,6 +1,7 @@
 ﻿param([int]$Last = 60)
 # Pull Andromeda/Orea bug logs from the phone: event counts by kind, last N events, newest auto reports.
-$adb = 'C:\Users\barry\Developer\tools\android-sdk\platform-tools\adb.exe'
+# platform-tools 35：新版 adb（37）連 Xiaomi 15 Ultra 一直 offline
+$adb = 'D:\Android\platform-tools-35\adb.exe'
 $pkg = 'com.liquid.browser.next'
 $remote = "/sdcard/Android/data/$pkg/files/bugs"
 $out = Join-Path $env:TEMP 'andromeda_bugs'
