@@ -563,13 +563,15 @@ class Tab(
                     lastRecorded = u
                     listener.onVisited(this@Tab, u, title)
                 }
-                view.evaluateJavascript(THEME_COLOR_JS) { themeColor = parseCssColor(it.trim('"')) }
-                // 網頁宣告的語言（<html lang>）：網址列的翻譯鈕只在跟翻譯目標不同時出現
-                view.evaluateJavascript("document.documentElement.lang") { pageLang = it.trim('"').lowercase() }
+                // 狀態列顏色、網頁宣告的語言（<html lang>：網址列的翻譯鈕只在跟翻譯目標不同時出現）、高解析度圖示：
+                // 一次問完（以前分三次 evaluateJavascript，各自來回一趟渲染程序）
                 val host = Uri.parse(u).host
-                if (host != null) view.evaluateJavascript(ICON_JS) { r ->
-                    val icon = r.trim('"')
-                    if (icon.startsWith("http")) listener.onIcon(host.removePrefix("www."), icon)
+                view.evaluateJavascript(PAGE_INFO_JS) { r ->
+                    val info = runCatching { JSONObject(org.json.JSONTokener(r).nextValue() as String) }.getOrNull() ?: return@evaluateJavascript
+                    themeColor = parseCssColor(info.optString("color"))
+                    pageLang = info.optString("lang").lowercase()
+                    val icon = info.optString("icon")
+                    if (host != null && icon.startsWith("http")) listener.onIcon(host.removePrefix("www."), icon)
                 }
             }
         }
@@ -1233,6 +1235,16 @@ private const val ICON_JS = """(function(){var best='',size=0;
 document.querySelectorAll('link[rel~="icon"],link[rel^="apple-touch-icon"]').forEach(function(l){
 var v=(l.sizes&&l.sizes.value)||'';var s=parseInt(v.split('x')[0])||(l.rel.indexOf('apple')>=0?180:16);
 if(s>size){size=s;best=l.href}});return size>=48?best:''})()"""
+
+/** 載入完成時要的三樣資訊（JSON 字串）；各自 try，一樣出錯不影響其他兩樣 */
+private const val PAGE_INFO_JS = """(function(){
+  function g(f){try{return f()||''}catch(e){return ''}}
+  return JSON.stringify({
+    color: g(function(){return $THEME_COLOR_JS}),
+    lang: g(function(){return document.documentElement.lang}),
+    icon: g(function(){return $ICON_JS})
+  });
+})()"""
 
 /** 解析 CSS 顏色字串（#rgb、#rrggbb、rgb()、rgba()）。 */
 fun parseCssColor(s: String): Color? {
