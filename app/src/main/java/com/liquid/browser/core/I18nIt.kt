@@ -96,6 +96,7 @@ internal val IT: Map<String, String> = hashMapOf(
     "擴充功能" to "Estensioni",
     "擴展工具管理" to "Estensioni",
     "使用者腳本指令" to "Comandi degli script utente",
+    "需要背景程式，在 Orea 無法運作，建議移除" to "Richiede un programma in background; non funziona in Orea. Ti consigliamo di rimuoverla",
     "以 Tampermonkey 名義執行" to "Esegui come Tampermonkey",
     "有些需要會員的腳本只在 Tampermonkey 裡執行。打開後，腳本看到的管理器名稱會是 Tampermonkey。綁定會員請在網站上開啟頁面選單 → 使用者腳本指令" to "Alcuni script a pagamento funzionano solo in Tampermonkey. Se attivo, gli script vedono Tampermonkey come gestore. Per collegare l'abbonamento, apri il sito e vai su Menu pagina → Comandi degli script utente",
     "已更新 %1\$s 個使用者腳本" to "Script utente aggiornati: %1\$s",

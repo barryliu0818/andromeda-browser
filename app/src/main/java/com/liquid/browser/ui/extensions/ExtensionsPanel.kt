@@ -74,7 +74,8 @@ fun ExtensionsPanel(vm: BrowserViewModel, tone: Tone, onOpenStore: (String) -> U
             val kind = if (e.userScript) t("使用者腳本") else if (e.manifest.has("browser_specific_settings") || e.manifest.has("applications")) "Firefox" else "Chrome"
             GroupRow(
                 i, exts.size, tone, e.name.ifBlank { e.id },
-                subtitle = listOfNotNull(kind, e.version.takeIf { it.isNotBlank() }?.let { "v$it" }, e.description.takeIf { it.isNotBlank() }).joinToString("・"),
+                subtitle = if (!e.works) t("需要背景程式，在 Orea 無法運作，建議移除")
+                else listOfNotNull(kind, e.version.takeIf { it.isNotBlank() }?.let { "v$it" }, e.description.takeIf { it.isNotBlank() }).joinToString("・"),
                 leading = { IconTile(if (e.userScript) "code" else "extension", if (e.userScript) Color(0xFF34C759) else Color(0xFFFF9500)) },
                 trailing = {
                     SymButton("delete", Palette.Gray, size = 20.dp, label = t("移除")) {

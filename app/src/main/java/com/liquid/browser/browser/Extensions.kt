@@ -31,7 +31,22 @@ object Extensions {
         val messages: JSONObject, val manifest: JSONObject, val enabled: Boolean,
         /** 使用者腳本的固定編號（GM_info.script.uuid）：安裝時產生，更新後不變 */
         val uuid: String = "",
+        /** false：網頁端要跟背景程式要資料，Orea 沒有背景程式，裝了也不會動（舊版裝進來的才會有） */
+        val works: Boolean = true,
     )
+
+    /**
+     * 擴充功能的網頁端腳本會不會跟背景程式要東西（runtime.sendMessage／connect）：Orea 不執行背景程式，
+     * 這種擴充裝了也不會有作用（實測 Dark Reader、Return YouTube Dislike、SponsorBlock、沉浸式翻譯都是；Video Speed Controller 不是）
+     */
+    private fun needsBackground(manifest: JSONObject, dir: File): Boolean {
+        val bg = manifest.optJSONObject("background") ?: return false
+        if (bg.length() == 0) return false
+        return manifest.optJSONArray("content_scripts").objects().flatMap { it.optJSONArray("js").strings() }.any { p ->
+            val src = File(dir, p.removePrefix("./").trimStart('/')).takeIf(File::isFile)?.readText().orEmpty()
+            src.contains("sendMessage") || src.contains("runtime.connect")
+        }
+    }
 
     /** 已安裝的擴充（設定頁顯示） */
     val list = mutableStateListOf<Ext>()
@@ -131,7 +146,7 @@ object Extensions {
             }
         }
         val manifest = runCatching { JSONObject(File(tmp, "manifest.json").readText()) }.getOrNull() ?: error("找不到 manifest.json")
-        if ((manifest.optJSONArray("content_scripts")?.length() ?: 0) == 0)
+        if ((manifest.optJSONArray("content_scripts")?.length() ?: 0) == 0 || needsBackground(manifest, tmp))
             error("這個擴充功能需要工具列按鈕或背景程式，Orea 目前只支援會修改網頁的擴充功能")
         val gecko = (manifest.optJSONObject("browser_specific_settings") ?: manifest.optJSONObject("applications"))?.optJSONObject("gecko")?.optString("id")
         val id = gecko?.takeIf { it.isNotBlank() } ?: manifest.optString("name") + "@" + source.substringBefore('?')
@@ -291,12 +306,15 @@ object Extensions {
             Script(
                 cs.optJSONArray("matches").strings().mapNotNull(::matchPattern),
                 cs.optJSONArray("exclude_matches").strings().mapNotNull(::matchPattern) + cs.optJSONArray("exclude_globs").strings().mapNotNull(::globOrRegex),
-                cs.optJSONArray("js").strings().joinToString("\n;\n") { File(dir, it.trimStart('/')).takeIf(File::exists)?.readText().orEmpty() },
-                cs.optJSONArray("css").strings().joinToString("\n") { File(dir, it.trimStart('/')).takeIf(File::exists)?.readText().orEmpty() },
+                cs.optJSONArray("js").strings().joinToString("\n;\n") { File(dir, it.removePrefix("./").trimStart('/')).takeIf(File::exists)?.readText().orEmpty() },
+                cs.optJSONArray("css").strings().joinToString("\n") { File(dir, it.removePrefix("./").trimStart('/')).takeIf(File::exists)?.readText().orEmpty() },
                 cs.optString("run_at", "document_idle"), cs.optBoolean("all_frames"),
             )
         }
-        return Ext(id, msg(manifest.optString("name")), manifest.optString("version"), msg(manifest.optString("description")), false, meta.optString("source"), scripts, messages, manifest, enabled)
+        return Ext(
+            id, msg(manifest.optString("name")), manifest.optString("version"), msg(manifest.optString("description")), false, meta.optString("source"),
+            scripts, messages, manifest, enabled, works = !needsBackground(manifest, dir),
+        )
     }
 
     /** _locales：依系統語言挑（zh_TW → zh → 預設語言 → en） */
@@ -353,7 +371,7 @@ object Extensions {
      * ponytail: 所有擴充的程式碼都帶進每個頁面再比對網址，擴充很多（數 MB）時每頁多一點解析成本；要更省再改成依網域分組註冊
      */
     fun documentStartScript(): String? {
-        val active = list.filter { it.enabled && it.scripts.isNotEmpty() }
+        val active = list.filter { it.enabled && it.works && it.scripts.isNotEmpty() }
         if (active.isEmpty()) return null
         return buildString {
             append("(function(){if(window.__oreaExt)return;window.__oreaExt=1;var u=location.href,top=window.top===window;")

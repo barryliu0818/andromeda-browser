@@ -96,6 +96,7 @@ internal val KO: Map<String, String> = hashMapOf(
     "擴充功能" to "확장 프로그램",
     "擴展工具管理" to "확장 프로그램",
     "使用者腳本指令" to "사용자 스크립트 명령",
+    "需要背景程式，在 Orea 無法運作，建議移除" to "백그라운드 프로그램이 필요해 Orea에서 작동하지 않습니다. 삭제를 권장합니다",
     "以 Tampermonkey 名義執行" to "Tampermonkey로 실행",
     "有些需要會員的腳本只在 Tampermonkey 裡執行。打開後，腳本看到的管理器名稱會是 Tampermonkey。綁定會員請在網站上開啟頁面選單 → 使用者腳本指令" to "일부 유료 스크립트는 Tampermonkey에서만 실행됩니다. 켜면 스크립트에는 관리자가 Tampermonkey로 보입니다. 멤버십 연결은 사이트를 연 뒤 페이지 메뉴 → 사용자 스크립트 명령에서 하세요",
     "已更新 %1\$s 個使用者腳本" to "업데이트된 사용자 스크립트: %1\$s",
