@@ -409,7 +409,11 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         AdBlocker.init(app)
         Extensions.init(app)
         // 安裝在背景執行緒完成：重新註冊開頁腳本要回到主執行緒（WebView 只能在主執行緒操作）
-        Extensions.onChanged = { viewModelScope.launch(Dispatchers.Main) { tabs.forEach { it.applyExtensions() } } }
+        // 擴充功能的背景程式、彈出視窗與訊息轉送
+        ExtensionHost.init(app, extBrowser())
+        Extensions.onChanged = { viewModelScope.launch(Dispatchers.Main) { tabs.forEach { it.applyExtensions() }; ExtensionHost.sync() } }
+        // 背景程式等開 App 的畫面出來後再啟動（不跟第一個網頁搶時間）
+        viewModelScope.launch(Dispatchers.Main) { delay(1500); ExtensionHost.sync() }
         // 使用者腳本更新：開 App 一會兒後在背景檢查（每個腳本一天最多檢查一次，同 Tampermonkey）
         viewModelScope.launch(Dispatchers.IO) {
             delay(30_000)
@@ -467,6 +471,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         val at = current?.let { tabs.indexOf(it) + 1 }?.takeIf { it > 0 } ?: tabs.size
         tabs.add(at, tab)
         if (!background || current == null) select(tab)
+        if (!incognito) ExtensionHost.tabCreated(tab)
         if (!url.isNullOrBlank()) tab.load(url)
         return tab
     }
@@ -481,6 +486,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         prev?.setForeground(false)
         tab.setForeground(true)
         current = tab
+        ExtensionHost.tabActivated(tab)
         incognitoMode = tab.incognito
         collapse = 0f
         collapsed = false
@@ -521,7 +527,19 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         return list.getOrNull(i + dir)
     }
 
+    /** 擴充功能看到的瀏覽器（chrome.tabs 等） */
+    private fun extBrowser(): ExtensionHost.Browser = object : ExtensionHost.Browser {
+        override val allTabs: List<Tab> get() = tabs
+        override val currentTab: Tab? get() = current
+        override fun openTab(url: String, active: Boolean): Tab = newTab(url, incognito = false, background = !active)
+        override fun closeTab(tab: Tab) = close(tab)
+        override fun selectTab(tab: Tab) = select(tab)
+        override fun toast(text: String) = showToast(text)
+        override fun download(tab: Tab?, url: String, name: String) { (tab ?: current)?.let { onGmDownload(it, url, name) } }
+    }
+
     fun close(tab: Tab) {
+        ExtensionHost.tabRemoved(tab)
         val siblings = tabs.filter { it.incognito == tab.incognito }
         val i = siblings.indexOf(tab)
         tabs.remove(tab)

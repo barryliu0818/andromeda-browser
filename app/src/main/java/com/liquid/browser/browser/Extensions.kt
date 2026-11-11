@@ -23,7 +23,8 @@ import java.util.zip.ZipInputStream
  * 所有已啟用的腳本組成一段「開頁腳本」，每個頁面（含 iframe）開始載入時執行，依網址比對決定跑哪些。
  */
 object Extensions {
-    class Script(val matches: List<Regex>, val excludes: List<Regex>, val js: String, val css: String, val runAt: String, val allFrames: Boolean)
+    /** main：在網頁本身的環境執行（world: MAIN），不給 chrome.* */
+    class Script(val matches: List<Regex>, val excludes: List<Regex>, val js: String, val css: String, val runAt: String, val allFrames: Boolean, val main: Boolean = false)
 
     class Ext(
         val id: String, val name: String, val version: String, val description: String,
@@ -31,21 +32,72 @@ object Extensions {
         val messages: JSONObject, val manifest: JSONObject, val enabled: Boolean,
         /** 使用者腳本的固定編號（GM_info.script.uuid）：安裝時產生，更新後不變 */
         val uuid: String = "",
-        /** false：網頁端要跟背景程式要資料，Orea 沒有背景程式，裝了也不會動（舊版裝進來的才會有） */
+        /** false：靠瀏覽器內建的網路過濾或腳本管理功能運作，Orea 執行不了（見 [unsupported]） */
         val works: Boolean = true,
-    )
+        /** 有背景程式（MV3 service_worker、MV2 scripts／page）：由 [ExtensionHost] 在看不見的頁面執行 */
+        val background: Boolean = false,
+        /** 工具列按鈕的彈出視窗、選項頁（相對路徑） */
+        val popup: String? = null,
+        val options: String? = null,
+        /** 安裝時間（更新後背景程式要重新啟動） */
+        val stamp: Long = 0,
+        /** 剛安裝（"install"）或剛更新（"update"）：背景程式啟動後觸發 runtime.onInstalled 一次 */
+        val fresh: String = "",
+        /** Firefox 附加元件（.xpi）：有 browser.*、manifest 保留 Firefox 的設定；Chrome 擴充沒有這兩樣（同 Chrome） */
+        val firefox: Boolean = false,
+    ) {
+        val sid: String get() = dirName(id)
+        /** 給擴充看的 manifest（chrome.runtime.getManifest）：Chrome 不給 Firefox 專用的欄位，有些擴充靠這個判斷自己在哪個瀏覽器 */
+        val jsManifest: JSONObject get() = if (firefox) manifest else JSONObject(manifest.toString()).apply { remove("browser_specific_settings"); remove("applications") }
+        /** chrome.runtime.id：跟 Chrome 一樣是 32 個 a～p 的字母 */
+        val chromeId: String get() = java.security.MessageDigest.getInstance("SHA-256").digest(id.toByteArray()).take(16)
+            .joinToString("") { b -> "%02x".format(b) }.map { 'a' + Character.digit(it, 16) }.joinToString("")
+    }
 
     /**
-     * 擴充功能的網頁端腳本會不會跟背景程式要東西（runtime.sendMessage／connect）：Orea 不執行背景程式，
-     * 這種擴充裝了也不會有作用（實測 Dark Reader、Return YouTube Dislike、SponsorBlock、沉浸式翻譯都是；Video Speed Controller 不是）
+     * 執行不了的擴充：只靠瀏覽器內建的網路過濾（declarativeNetRequest、webRequestBlocking、proxy）
+     * 或使用者腳本管理功能（userScripts）、又沒有內容腳本的（uBlock Origin Lite、Tampermonkey 本身），
+     * 以及什麼都沒有的（沒有內容腳本、背景程式、彈出視窗、選項頁）
      */
-    private fun needsBackground(manifest: JSONObject, dir: File): Boolean {
-        val bg = manifest.optJSONObject("background") ?: return false
-        if (bg.length() == 0) return false
-        return manifest.optJSONArray("content_scripts").objects().flatMap { it.optJSONArray("js").strings() }.any { p ->
-            val src = File(dir, p.removePrefix("./").trimStart('/')).takeIf(File::isFile)?.readText().orEmpty()
-            src.contains("sendMessage") || src.contains("runtime.connect")
-        }
+    private fun unsupported(m: JSONObject): Boolean {
+        if ((m.optJSONArray("content_scripts")?.length() ?: 0) > 0) return false
+        val perms = m.optJSONArray("permissions").strings()
+        if (perms.any { it in NET_ONLY }) return true
+        return !hasBackground(m) && popupOf(m) == null && optionsOf(m) == null
+    }
+    private val NET_ONLY = setOf("declarativeNetRequest", "declarativeNetRequestWithHostAccess", "userScripts", "webRequestBlocking", "proxy")
+
+    private fun hasBackground(m: JSONObject): Boolean {
+        val bg = m.optJSONObject("background") ?: return false
+        return bg.optString("service_worker").isNotEmpty() || bg.optString("page").isNotEmpty() || (bg.optJSONArray("scripts")?.length() ?: 0) > 0
+    }
+    private fun popupOf(m: JSONObject): String? =
+        (m.optJSONObject("action") ?: m.optJSONObject("browser_action") ?: m.optJSONObject("page_action"))?.optString("default_popup")?.takeIf { it.isNotBlank() }
+    private fun optionsOf(m: JSONObject): String? =
+        m.optJSONObject("options_ui")?.optString("page")?.takeIf { it.isNotBlank() } ?: m.optString("options_page").takeIf { it.isNotBlank() }
+
+    /** 擴充資料夾（代號不對或不存在回傳 null） */
+    fun dirOf(sid: String): File? = File(root, sid).takeIf { sid.matches(Regex("[0-9a-f]{16}")) && it.isDirectory }
+
+    fun bySid(sid: String): Ext? = list.firstOrNull { it.sid == sid }
+
+    /** runtime.onInstalled 已觸發：清掉剛安裝的記號 */
+    fun clearFresh(sid: String) {
+        val f = File(dirOf(sid) ?: return, META)
+        runCatching { val m = JSONObject(f.readText()); if (m.has("fresh")) { m.remove("fresh"); f.writeText(m.toString()) } }
+        val i = list.indexOfFirst { it.sid == sid }
+        if (i >= 0) runCatching { list[i] = load(File(root, sid)) }
+    }
+
+    /** chrome.scripting.registerContentScripts 等：動態內容腳本存在 dynamic.json，載入時跟 manifest 的合併 */
+    fun dynamicScripts(sid: String): JSONArray = runCatching { JSONArray(File(dirOf(sid)!!, "dynamic.json").readText()) }.getOrDefault(JSONArray())
+
+    fun setDynamicScripts(sid: String, arr: JSONArray) {
+        val dir = dirOf(sid) ?: return
+        File(dir, "dynamic.json").writeText(arr.toString())
+        val i = list.indexOfFirst { it.sid == sid }
+        if (i >= 0) runCatching { list[i] = load(dir) }
+        onChanged?.invoke()
     }
 
     /** 已安裝的擴充（設定頁顯示） */
@@ -145,12 +197,13 @@ object Extensions {
                 if (e.isDirectory) out.mkdirs() else { out.parentFile?.mkdirs(); out.outputStream().use { zip.copyTo(it) } }
             }
         }
-        val manifest = runCatching { JSONObject(File(tmp, "manifest.json").readText()) }.getOrNull() ?: error("找不到 manifest.json")
-        if ((manifest.optJSONArray("content_scripts")?.length() ?: 0) == 0 || needsBackground(manifest, tmp))
-            error("這個擴充功能需要工具列按鈕或背景程式，Orea 目前只支援會修改網頁的擴充功能")
+        val manifest = runCatching { JSONObject(File(tmp, "manifest.json").readText().removePrefix("\uFEFF")) }.getOrNull() ?: error("找不到 manifest.json")
+        if (unsupported(manifest)) error("這個擴充功能要靠瀏覽器內建的網路過濾或腳本管理功能，Orea 無法執行")
         val gecko = (manifest.optJSONObject("browser_specific_settings") ?: manifest.optJSONObject("applications"))?.optJSONObject("gecko")?.optString("id")
         val id = gecko?.takeIf { it.isNotBlank() } ?: manifest.optString("name") + "@" + source.substringBefore('?')
-        File(tmp, META).writeText(JSONObject().put("id", id).put("source", source).put("enabled", true).toString())
+        val fresh = if (File(root, dirName(id)).isDirectory) "update" else "install"
+        val kind = if (bytes.size > 4 && String(bytes, 0, 4) == "Cr24") "chrome" else if (!gecko.isNullOrBlank() || source.contains(".xpi") || source.contains("addons.mozilla.org")) "firefox" else "chrome"
+        File(tmp, META).writeText(JSONObject().put("id", id).put("source", source).put("enabled", true).put("fresh", fresh).put("kind", kind).put("installed", System.currentTimeMillis()).toString())
         return moveInto(tmp, id)
     }
 
@@ -299,21 +352,35 @@ object Extensions {
                 JSONObject(), JSONObject().put("name", m["name"]?.firstOrNull()).put("version", m["version"]?.firstOrNull()), enabled, uuid,
             )
         }
-        val manifest = JSONObject(File(dir, "manifest.json").readText())
+        val manifest = JSONObject(File(dir, "manifest.json").readText().removePrefix("\uFEFF"))
         val messages = localeMessages(dir, manifest.optString("default_locale"))
         fun msg(s: String) = Regex("__MSG_(\\w+)__").replace(s) { r -> messages.optJSONObject(r.groupValues[1])?.optString("message") ?: messages.keys().asSequence().firstOrNull { it.equals(r.groupValues[1], true) }?.let { messages.getJSONObject(it).optString("message") } ?: r.value }
-        val scripts = manifest.optJSONArray("content_scripts").objects().map { cs ->
+        fun file(p: String) = File(dir, p.removePrefix("./").trimStart('/')).takeIf(File::isFile)?.readText().orEmpty()
+        val manifestScripts = manifest.optJSONArray("content_scripts").objects().map { cs ->
             Script(
                 cs.optJSONArray("matches").strings().mapNotNull(::matchPattern),
                 cs.optJSONArray("exclude_matches").strings().mapNotNull(::matchPattern) + cs.optJSONArray("exclude_globs").strings().mapNotNull(::globOrRegex),
-                cs.optJSONArray("js").strings().joinToString("\n;\n") { File(dir, it.removePrefix("./").trimStart('/')).takeIf(File::exists)?.readText().orEmpty() },
-                cs.optJSONArray("css").strings().joinToString("\n") { File(dir, it.removePrefix("./").trimStart('/')).takeIf(File::exists)?.readText().orEmpty() },
-                cs.optString("run_at", "document_idle"), cs.optBoolean("all_frames"),
+                cs.optJSONArray("js").strings().joinToString("\n;\n", transform = ::file),
+                cs.optJSONArray("css").strings().joinToString("\n", transform = ::file),
+                cs.optString("run_at", "document_idle"), cs.optBoolean("all_frames"), cs.optString("world") == "MAIN",
+            )
+        }
+        // chrome.scripting.registerContentScripts 註冊的（格式同 Chrome 的 RegisteredContentScript）
+        val dynamic = dynamicScripts(dir.name).objects().map { cs ->
+            Script(
+                cs.optJSONArray("matches").strings().mapNotNull(::matchPattern),
+                cs.optJSONArray("excludeMatches").strings().mapNotNull(::matchPattern),
+                cs.optJSONArray("js").strings().joinToString("\n;\n", transform = ::file),
+                cs.optJSONArray("css").strings().joinToString("\n", transform = ::file),
+                cs.optString("runAt", "document_idle"), cs.optBoolean("allFrames"), cs.optString("world") == "MAIN",
             )
         }
         return Ext(
             id, msg(manifest.optString("name")), manifest.optString("version"), msg(manifest.optString("description")), false, meta.optString("source"),
-            scripts, messages, manifest, enabled, works = !needsBackground(manifest, dir),
+            manifestScripts + dynamic, messages, manifest, enabled, works = !unsupported(manifest),
+            background = hasBackground(manifest), popup = popupOf(manifest), options = optionsOf(manifest),
+            stamp = meta.optLong("installed"), fresh = meta.optString("fresh"),
+            firefox = meta.optString("kind").let { k -> if (k.isNotEmpty()) k == "firefox" else meta.optString("source").let { s -> s.contains(".xpi") || s.contains("addons.mozilla.org") } },
         )
     }
 
@@ -323,7 +390,7 @@ object Extensions {
         val tries = listOf("${loc.language}_${loc.country}", loc.language, default, "en")
         for (l in tries) {
             val f = File(dir, "_locales/$l/messages.json")
-            if (f.exists()) return runCatching { JSONObject(f.readText()) }.getOrDefault(JSONObject())
+            if (f.exists()) return runCatching { JSONObject(f.readText().removePrefix("\uFEFF")) }.getOrDefault(JSONObject())
         }
         return JSONObject()
     }
@@ -375,24 +442,42 @@ object Extensions {
         if (active.isEmpty()) return null
         return buildString {
             append("(function(){if(window.__oreaExt)return;window.__oreaExt=1;var u=location.href,top=window.top===window;")
+            // Trusted Types（YouTube 等網站開著）：Chrome 的擴充在獨立的環境執行、不受網頁限制；Orea 的在網頁裡執行，
+            // 有擴充要跑的網頁先放一個照單全收的預設政策（網頁沒設預設政策、CSP 也允許時），擴充設 innerHTML 等才不會被擋
+            append("var TT=0;function tt(){if(TT)return;TT=1;try{if(window.trustedTypes&&!trustedTypes.defaultPolicy){var p=function(s){return s};trustedTypes.createPolicy('default',{createHTML:p,createScript:p,createScriptURL:p})}}catch(e){}}")
             // 使用者腳本跟 App 溝通用的通道：在網頁任何程式執行前就把 LiquidBridge、JSON、__oreaGM 抓進閉包（網頁事後換掉也影響不到），
             // 每個請求都帶 token；App 的回覆依 gm＋id 分給等待中的回呼
-            if (active.any { it.userScript }) append(gmChannel())
+            append(gmChannel())
+            // 擴充功能的內容腳本：每個擴充在每個框架一份 chrome.*（同一個擴充的內容腳本共用監聽器）；訊息走 O 通道
+            if (active.any { !it.userScript }) {
+                append(ExtensionHost.apiJs)
+                append("var X={};function ch(s,f){return X[s]||(X[s]=__oreaMkChrome(f,function(d){O.send({type:'ext',sid:s,d:d})},function(h){O.on('ext:'+s,function(m){h(m.d)})}))}")
+                append(GLOBAL_PROXY)
+                // 擴充用 import() 載入自己的模組（模組在網頁的全域執行，拿不到內容腳本的 chrome）：模組開頭會用這次開 App 的金鑰跟這裡拿（見 [resource]）
+                append("var K={};try{Object.defineProperty(window,'__oreaApi',{value:function(k){return K[k]}})}catch(e){}")
+            }
             append("function when(r,f){if(r==='document_start')return f();var go=function(){r==='document_idle'?setTimeout(f,0):f()};")
             append("document.readyState==='loading'?document.addEventListener('DOMContentLoaded',go,{once:true}):go()}")
             append("function css(t){var s=document.createElement('style');s.textContent=t;var p=document.head||document.documentElement;p?p.appendChild(s):document.addEventListener('DOMContentLoaded',function(){document.head.appendChild(s)})}")
-            for (ext in active) {
+            for ((n, ext) in active.withIndex()) {
+                // 這個擴充的設定只在第一次用到時建立（manifest、語系字串可能不小）
+                if (!ext.userScript) append("\nfunction C$n(){var c=ch(").append(JSONObject.quote(ext.sid)).append(",").append(csConfig(ext)).append(");")
+                    .append("var k=").append(JSONObject.quote(moduleKey(ext.sid))).append(";K[k]||(K[k]={c:c,b:").append(if (ext.firefox) "c" else "undefined")
+                    .append(",g:gp(c,").append(ext.firefox).append(")});return c}")
                 ext.scripts.forEach { s ->
                     if (s.matches.isEmpty()) return@forEach
                     val inc = s.matches.joinToString(",") { "/" + jsRegex(it) + "/" }
                     val exc = s.excludes.joinToString(",") { "/" + jsRegex(it) + "/" }
                     append("\nif((top||").append(s.allFrames).append(")&&[").append(inc).append("].some(function(r){return r.test(u)})&&![").append(exc).append("].some(function(r){return r.test(u)})){")
+                    append("tt();")
                     if (s.css.isNotBlank()) append("when('document_start',function(){css(").append(JSONObject.quote(s.css)).append(")});")
                     if (s.js.isNotBlank()) {
                         append("when(").append(JSONObject.quote(s.runAt)).append(",function(){try{")
                         if (ext.userScript) append("(function(").append(GM_PARAMS).append("){")
                             .append(s.js).append("\n}).apply(window,").append(gmShim(ext, s.js)).append(");")
-                        else append("(function(chrome,browser){").append(s.js).append("\n}).apply(window,(function(){var c=").append(chromeShim(ext)).append(";return[c,c]})());")
+                        else if (s.main) append("(function(){").append(s.js).append("\n}).call(window);")
+                        else append("(function(chrome,browser,globalThis){").append(s.js).append("\n}).call(window,C$n(),")
+                            .append(if (ext.firefox) "C$n()" else "undefined").append(",gp(C$n(),").append(ext.firefox).append("));")
                         append("}catch(e){console.error('[Orea 擴充] ").append(ext.name.replace("'", "")).append("',e)}});")
                     }
                     append("}")
@@ -407,22 +492,33 @@ object Extensions {
         Regex("\\\\Q(.*?)\\\\E").replace(r.pattern) { m -> m.groupValues[1].replace(Regex("[.*+?^\${}()|\\[\\]\\\\/]")) { "\\" + it.value } }
             .replace(Regex("(?<!\\\\)/"), "\\\\/")
 
-    /** 內容腳本用的精簡 chrome.*：runtime（getURL、getManifest、訊息為空操作）、storage（存在網站的 localStorage）、i18n */
-    private fun chromeShim(ext: Ext): String {
-        val key = JSONObject.quote("__oreaExt:" + dirName(ext.id))
-        val base = JSONObject.quote("$RES_PATH${dirName(ext.id)}/")
-        return """(function(){var K=$key,B=location.origin+$base,M=${ext.messages},MF=${ext.manifest};
-function ld(){try{return JSON.parse(localStorage.getItem(K)||'{}')}catch(e){return{}}}function sv(o){try{localStorage.setItem(K,JSON.stringify(o))}catch(e){}}
-function cb(f,v){if(typeof f==='function')setTimeout(function(){f(v)},0);return Promise.resolve(v)}
-var area={get:function(k,f){var o=ld(),r={};if(k==null)r=o;else if(typeof k==='string')k in o&&(r[k]=o[k]);else if(Array.isArray(k))k.forEach(function(x){x in o&&(r[x]=o[x])});else for(var x in k)r[x]=x in o?o[x]:k[x];return cb(f,r)},
-set:function(v,f){var o=ld();for(var x in v)o[x]=v[x];sv(o);return cb(f)},remove:function(k,f){var o=ld();[].concat(k).forEach(function(x){delete o[x]});sv(o);return cb(f)},clear:function(f){sv({});return cb(f)}};
-var ev={addListener:function(){},removeListener:function(){},hasListener:function(){return false}};
-return{runtime:{id:K,getURL:function(p){return B+String(p).replace(/^\//,'')},getManifest:function(){return MF},sendMessage:function(){var a=arguments;return cb(typeof a[a.length-1]==='function'?a[a.length-1]:null)},onMessage:ev,connect:function(){return{postMessage:function(){},onMessage:ev,onDisconnect:ev,disconnect:function(){}}},lastError:undefined},
-storage:{local:area,sync:area,session:area,onChanged:ev},
-i18n:{getMessage:function(n,s){var m=M[n]||M[Object.keys(M).find(function(x){return x.toLowerCase()===String(n).toLowerCase()})];if(!m)return'';var t=m.message;s=[].concat(s==null?[]:s);
-if(m.placeholders)for(var p in m.placeholders){var c=m.placeholders[p].content||'';t=t.split('$'+p+'$').join(c).split('$'+p.toUpperCase()+'$').join(c)}
-return t.replace(/\$(\d)/g,function(_,d){return s[d-1]==null?'':s[d-1]})},getUILanguage:function(){return navigator.language}},
-extension:{getURL:function(p){return B+String(p).replace(/^\//,'')}}}})()"""
+    /**
+     * chrome.scripting.executeScript／tabs.executeScript：在分頁執行擴充的程式（跟內容腳本一樣有 chrome.*），
+     * 回傳值是最後一個運算式的值（evaluateJavascript 的結果）
+     */
+    fun injectionScript(ext: Ext, code: String, main: Boolean): String {
+        if (main) return "(0,eval)(" + JSONObject.quote(code) + ")"
+        val s = JSONObject.quote(ext.sid)
+        return "(function(){" + gmChannel() + ExtensionHost.apiJs +
+            GLOBAL_PROXY + "var c=__oreaMkChrome(" + csConfig(ext) + ",function(d){O.send({type:'ext',sid:$s,d:d})},function(h){O.on('ext:'+$s,function(m){h(m.d)})});" +
+            "return(function(chrome,browser,globalThis){return eval(" + JSONObject.quote(code) + ")}).call(window,c," + (if (ext.firefox) "c" else "undefined") + ",gp(c," + ext.firefox + "))})()"
+    }
+
+    /**
+     * 擴充程式看到的 globalThis：Chrome 的內容腳本在獨立的環境，globalThis.chrome 就是擴充的 API（webextension-polyfill 等靠這個判斷自己在擴充裡）。
+     * Orea 的內容腳本跑在網頁裡，不能把 chrome 放到真的 window（網頁就能冒充內容腳本跟擴充要資料），
+     * 所以給擴充一個 window 的代理：讀 chrome／browser 拿到擴充的，其他照 window（原生函式綁回 window 才能呼叫），寫入寫到 window
+     */
+    private const val GLOBAL_PROXY = "var FTS=Function.prototype.toString,BND=new WeakMap();function gp(c,ff){return c.__g||(Object.defineProperty(c,'__g',{value:new Proxy(window,{" +
+        "get:function(t,k){if(k==='chrome')return c;if(k==='browser')return ff?c:undefined;var v=t[k];" +
+        "if(typeof v==='function'&&!v.prototype){var b=BND.get(v);if(!b){try{b=/\\[native code\\]/.test(FTS.call(v))?v.bind(t):v}catch(e){b=v}BND.set(v,b)}return b}return v}," +
+        "set:function(t,k,v){t[k]=v;return true},has:function(t,k){return k==='chrome'||k in t}})}),c.__g)}"
+
+    /** 內容腳本的 chrome.* 設定（JS 運算式）：getURL 指向網頁自己網站下的 [RES_PATH]（見 [resource]） */
+    private fun csConfig(ext: Ext): String {
+        val cfg = JSONObject().put("sid", ext.sid).put("id", ext.chromeId).put("manifest", ext.jsManifest).put("messages", ext.messages)
+            .put("lang", java.util.Locale.getDefault().toLanguageTag()).put("page", false).put("firefox", ext.firefox)
+        return "Object.assign(" + cfg + ",{base:location.origin+" + JSONObject.quote(RES_PATH + ext.sid + "/") + "})"
     }
 
     /** 使用者腳本函式的參數名稱（腳本裡直接用這些名字，跟 Tampermonkey／Violentmonkey 一樣不必加 window.） */
@@ -503,7 +599,7 @@ addValueChangeListener:addL,removeValueChangeListener:remL,log:console.log.bind(
 return[info,GM,add,get,set,del,keys,xhr,open,clip,reg,unreg,note,dl,resT,resU,addEl,addL,remL,console.log.bind(console),gets,sets,dels,window]})()"""
 
     /** chrome.runtime.getURL() 的資源：從擴充資料夾讀檔（只回應已安裝擴充、而且在資料夾裡的檔案） */
-    fun resource(url: Uri): WebResourceResponse? {
+    fun resource(url: Uri, method: String = "GET", headers: Map<String, String> = emptyMap()): WebResourceResponse? {
         val path = url.path.orEmpty()
         if (!path.startsWith(RES_PATH)) return null
         val parts = path.removePrefix(RES_PATH).split('/', limit = 2)
@@ -514,8 +610,32 @@ return[info,GM,add,get,set,del,keys,xhr,open,clip,reg,unreg,note,dl,resT,resU,ad
         val mime = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(f.extension.lowercase()) ?: when (f.extension.lowercase()) {
             "js" -> "text/javascript"; "json" -> "application/json"; "css" -> "text/css"; "svg" -> "image/svg+xml"; else -> "application/octet-stream"
         }
+        moduleWithApi(parts[0], url, f, method, headers)?.let { return WebResourceResponse(mime, "utf-8", 200, "OK", mapOf("Access-Control-Allow-Origin" to "*"), it.byteInputStream()) }
         return WebResourceResponse(mime, "utf-8", 200, "OK", mapOf("Access-Control-Allow-Origin" to "*"), f.inputStream())
     }
+
+    /** 這次開 App、這個擴充的模組金鑰（網頁讀不到：只寫在開頁腳本與模組開頭） */
+    private fun moduleKey(sid: String) = java.security.MessageDigest.getInstance("SHA-256").digest((UserScripts.token + sid).toByteArray()).take(16).joinToString("") { "%02x".format(it) }
+
+    /**
+     * 擴充的 ES 模組（import() 或模組裡的 import）：開頭加上取得 chrome、browser、globalThis 的那一行。
+     * 只給同網站、GET、帶 Origin 的請求（瀏覽器載入模組才會這樣送；網頁用 fetch 讀同網站的檔案不帶 Origin、別的網站來讀 Origin 不同），
+     * 網頁才讀不到金鑰；一般（非模組）腳本不加，免得把 chrome 放進網頁的全域
+     */
+    private fun moduleWithApi(sid: String, url: Uri, f: File, method: String, headers: Map<String, String>): String? {
+        val ext = f.extension.lowercase()
+        if (ext != "js" && ext != "mjs") return null
+        if (!method.equals("GET", true)) return null
+        val origin = headers.entries.firstOrNull { it.key.equals("Origin", true) }?.value ?: return null
+        if (origin != "${url.scheme}://${url.authority}") return null
+        val accept = headers.entries.firstOrNull { it.key.equals("Accept", true) }?.value
+        if (accept != null && accept != "*/*") return null
+        if (bySid(sid)?.let { it.enabled && !it.userScript } != true) return null
+        val text = f.readText()
+        if (!ES_MODULE.containsMatchIn(text)) return null
+        return "const{c:chrome,b:browser,g:globalThis}=(typeof __oreaApi==='function'&&__oreaApi(" + JSONObject.quote(moduleKey(sid)) + "))||{};" + text
+    }
+    private val ES_MODULE = Regex("""(^|[\n;}])\s*(export\s*[{*]|export\s+(default|const|let|var|function|class|async)\b|import\s*[{*"']|import\s+\w)""")
 
     private fun JSONArray?.strings(): List<String> = if (this == null) emptyList() else List(length()) { optString(it) }
     private fun JSONArray?.objects(): List<JSONObject> = if (this == null) emptyList() else List(length()) { optJSONObject(it) }.filterNotNull()

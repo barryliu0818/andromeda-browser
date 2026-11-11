@@ -478,7 +478,8 @@ class Tab(
 
             // IDM 式影片嗅探：只觀察、不攔截。網頁播放器（含 blob:／hls.js、iframe 內）實際請求的影片網址都會被記下
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): android.webkit.WebResourceResponse? {
-                Extensions.resource(request.url)?.let { return it }
+                ExtensionHost.serve(request.url)?.let { return it }
+                Extensions.resource(request.url, request.method, request.requestHeaders)?.let { return it }
                 val u = request.url.toString()
                 // 廣告／追蹤阻擋：子資源符合清單就回空內容（Brave 引擎完整比對；沒有引擎時只比對網域）
                 if (!request.isForMainFrame) {
@@ -528,6 +529,7 @@ class Tab(
                 if (legacyInject && listener.shields()) view.evaluateJavascript(Shields.fingerprintJs, null)
                 if (legacyInject) view.evaluateJavascript(geoApproxScript(SitePermissionStore.approxOrigins(incognito)), null)
                 listener.onPageStart(this@Tab)
+                if (!incognito) { ExtensionHost.tabNavigated(this@Tab); ExtensionHost.tabLoading(this@Tab, u) }
                 gmFrames.clear(); gmCommands.clear()
                 clearAudio()
                 translated = false
@@ -584,6 +586,7 @@ class Tab(
             }
 
             override fun onPageFinished(view: WebView, u: String) {
+                if (!incognito) ExtensionHost.tabComplete(this@Tab)
                 com.liquid.browser.core.Engine.markHealthy(view.context)
                 title = view.title.orEmpty()
                 if (!incognito && Extensions.packageUrl(u) != null) listener.onExtensionOffer(this@Tab, u)
@@ -692,6 +695,8 @@ class Tab(
         installVideoBridge()
         // 使用者腳本同步讀值（GM_getValue）、讀 @resource；無痕分頁不跑擴充，也不加
         if (!incognito) w.addJavascriptInterface(UserScripts.Native(), "__oreaGM")
+        // 擴充功能的頁面（選項頁）開在分頁裡時用的 chrome.*（只在擴充自己的來源生效）
+        if (!incognito) { w.addJavascriptInterface(ExtensionHost.PageBridge({ web }, this), "__oreaXP"); ExtensionHost.addPageShim(w) }
         applyExtensions()
         applyShields(listener.shields())
         applyGeo()
@@ -756,6 +761,11 @@ class Tab(
                 val type = json.optString("type")
                 // 密碼訊息：只收最上層頁面、https、而且跟目前顯示的網站同一個來源（iframe 或別的網站送來的一律不理）
                 // 使用者腳本的 GM_* 請求：沒有這次開 App 的 token 的一律不理（網頁自己也能呼叫 LiquidBridge）
+                // 擴充功能內容腳本的 chrome.* 訊息
+                if (type == "ext") {
+                    if (json.optString("token") == UserScripts.token && !incognito) json.optJSONObject("d")?.let { ExtensionHost.fromFrame(this, reply, mainFrame, json.optString("sid"), it) }
+                    return@addWebMessageListener
+                }
                 if (type.startsWith("gm_")) {
                     if (json.optString("token") == UserScripts.token) handleGm(type, json, reply)
                     return@addWebMessageListener
@@ -1137,6 +1147,7 @@ class Tab(
 
     /** 關閉分頁或釋放時銷毀 WebView；之後再讀 [webView] 會建一個新的 */
     fun destroyWebView() {
+        ExtensionHost.tabNavigated(this)
         val w = web ?: return
         web = null
         (w.parent as? ViewGroup)?.removeView(w)

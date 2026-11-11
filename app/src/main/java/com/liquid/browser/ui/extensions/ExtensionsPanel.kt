@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -29,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.liquid.browser.browser.BrowserViewModel
 import com.liquid.browser.browser.Extensions
+import com.liquid.browser.browser.ExtensionHost
 import com.liquid.browser.core.Palette
 import com.liquid.browser.core.t
 import com.liquid.browser.ui.GroupFooter
@@ -57,6 +59,9 @@ private val Stores = listOf(
 fun ExtensionsPanel(vm: BrowserViewModel, tone: Tone, onOpenStore: (String) -> Unit) {
     val accent = accent
     val exts = Extensions.list.toList()
+    // 正在顯示的彈出視窗（工具列按鈕的 default_popup）
+    var popup by remember { mutableStateOf<Extensions.Ext?>(null) }
+    popup?.let { e -> ExtensionPopup(e) { popup = null } }
     LazyColumn(Modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 48.dp)) {
         item { PageTitle(t("擴展工具管理"), tone, Modifier.padding(start = 4.dp)) }
         item { GroupHeader(t("擴充功能商店"), tone) }
@@ -71,20 +76,29 @@ fun ExtensionsPanel(vm: BrowserViewModel, tone: Tone, onOpenStore: (String) -> U
         item { GroupFooter(t("在商店打開擴充功能的頁面，底部會問要不要安裝到 Orea")) }
         item { GroupHeader(if (exts.isEmpty()) t("還沒有安裝擴充功能") else t("已安裝"), tone) }
         itemsIndexed(exts, key = { _, e -> "ext:" + e.id }) { i, e ->
-            val kind = if (e.userScript) t("使用者腳本") else if (e.manifest.has("browser_specific_settings") || e.manifest.has("applications")) "Firefox" else "Chrome"
+            val kind = if (e.userScript) t("使用者腳本") else if (e.firefox) "Firefox" else "Chrome"
             GroupRow(
                 i, exts.size, tone, e.name.ifBlank { e.id },
-                subtitle = if (!e.works) t("需要背景程式，在 Orea 無法運作，建議移除")
+                subtitle = if (!e.works) t("在 Orea 無法運作，建議移除")
                 else listOfNotNull(kind, e.version.takeIf { it.isNotBlank() }?.let { "v$it" }, e.description.takeIf { it.isNotBlank() }).joinToString("・"),
                 leading = { IconTile(if (e.userScript) "code" else "extension", if (e.userScript) Color(0xFF34C759) else Color(0xFFFF9500)) },
                 trailing = {
+                    ExtensionHost.optionsUrl(e)?.takeIf { e.enabled } ?.let { u -> SymButton("settings", Palette.Gray, size = 20.dp, label = t("設定")) { onOpenStore(u) } }
                     SymButton("delete", Palette.Gray, size = 20.dp, label = t("移除")) {
                         Extensions.remove(e)
                         vm.showToast(t("已移除「%1\$s」", e.name))
                     }
                     IosSwitch(e.enabled, tone, Modifier.padding(start = 4.dp)) { on -> Extensions.setEnabled(e, on) }
                 },
-                onClick = { Extensions.setEnabled(e, !e.enabled) },
+                // 點擴充功能＝按它的工具列按鈕：有彈出視窗就開，沒有就觸發 action.onClicked；已停用的點了是開啟
+                onClick = {
+                    when {
+                        !e.enabled || !e.works -> Extensions.setEnabled(e, !e.enabled)
+                        e.popup != null -> popup = e
+                        e.background -> { ExtensionHost.clickAction(e); vm.showToast(e.name) }
+                        else -> Extensions.setEnabled(e, !e.enabled)
+                    }
+                },
             )
         }
         if (exts.any { it.userScript }) item(key = "ext-tm") {
@@ -103,7 +117,7 @@ fun ExtensionsPanel(vm: BrowserViewModel, tone: Tone, onOpenStore: (String) -> U
             Column(Modifier.fillMaxWidth().groupItem(0, 1, tone).padding(horizontal = 16.dp, vertical = 6.dp)) {
                 InstallField(tone, accent) { vm.installExtension(it) }
             }
-            GroupFooter(t("支援 Firefox 附加元件（.xpi）、Chrome 線上應用程式商店（.crx）與使用者腳本（.user.js，Greasy Fork）。也可以直接開啟商店頁面安裝。只支援會修改網頁的擴充功能，不支援工具列按鈕與背景程式；無痕分頁不執行擴充功能"))
+            GroupFooter(t("支援 Firefox 附加元件（.xpi）、Chrome 線上應用程式商店（.crx）與使用者腳本（.user.js，Greasy Fork）。也可以直接開啟商店頁面安裝。點擴充功能開啟它的視窗，齒輪是設定。無痕分頁不執行擴充功能"))
         }
     }
 }
@@ -146,3 +160,27 @@ private fun InstallField(tone: Tone, accent: Color, onInstall: (String) -> Unit)
         }
     }
 }
+
+/** 擴充功能的彈出視窗（同 Chrome 按工具列按鈕跳出的小視窗）：擴充自己的頁面，有完整的 chrome.* */
+@Composable
+private fun ExtensionPopup(ext: Extensions.Ext, onClose: () -> Unit) {
+    val url = ExtensionHost.popupUrl(ext) ?: return
+    val close by androidx.compose.runtime.rememberUpdatedState(onClose)
+    androidx.compose.ui.window.Dialog(onDismissRequest = onClose, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+        androidx.compose.foundation.layout.Box(
+            Modifier.fillMaxWidth(0.94f).fillMaxHeight(0.78f).clip(RoundedCornerShape(22.dp)).background(Color.White),
+        ) {
+            androidx.compose.ui.viewinterop.AndroidView(
+                factory = { ctx ->
+                    android.webkit.WebView(ctx).also { w ->
+                        ExtensionHost.setupPageWebView(w, null) { close() }
+                        w.loadUrl(url)
+                    }
+                },
+                onRelease = { w -> ExtensionHost.pageClosed(w); w.destroy() },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}
+
