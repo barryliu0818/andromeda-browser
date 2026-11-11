@@ -97,7 +97,7 @@ fun pageMenu(anchor: Rect, tab: Tab, vm: BrowserViewModel, tone: Tone, context: 
         anchorIcon = "menu",
         width = 290,
         header = { m -> PageMenuHeader(tab, vm, tone, m, actions) },
-        items = listOf(
+        items = listOfNotNull(
             MenuItem(t("在此頁面上尋找"), "search") { actions.onFind() },
             if (tab.desktop) MenuItem(t("要求行動版網站"), "smartphone") { tab.setDesktopMode(false) }
             else MenuItem(t("要求桌面版網站"), "computer") { tab.setDesktopMode(true) },
@@ -107,6 +107,11 @@ fun pageMenu(anchor: Rect, tab: Tab, vm: BrowserViewModel, tone: Tone, context: 
                 val top = vm.settings.value.barLayout == com.liquid.browser.data.BarLayout.Top ||
                     context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
                 vm.showToast(if (top) t("點擊畫面頂部可叫回控制項") else t("點擊畫面底部可叫回控制項"))
+            },
+            // 這一頁的使用者腳本用 GM_registerMenuCommand 註冊的指令（Tampermonkey 放在它的工具列選單裡）
+            tab.gmCommands.toList().takeIf { it.isNotEmpty() }?.let { cmds ->
+                val many = cmds.map { it.script }.distinct().size > 1
+                MenuItem(t("使用者腳本指令"), "code", sub = cmds.map { c -> MenuItem(if (many) "${c.script}：${c.name}" else c.name) { c.send() } })
             },
             MenuItem(t("擴展工具管理"), "extension", push = true) { actions.onExtensions() },
             // 設定要隨時找得到：不只在分頁總覽的資料庫鈕裡

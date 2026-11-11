@@ -145,6 +145,11 @@ class Tab(
         fun onAppLink(tab: Tab, url: String, gesture: Boolean)
         /** 擴充功能：開到商店頁面或 .user.js／.xpi／.crx，詢問要不要安裝 */
         fun onExtensionOffer(tab: Tab, url: String)
+        /** 使用者腳本（GM_openInTab、GM_setClipboard、GM_notification、GM_download） */
+        fun onGmOpenTab(tab: Tab, url: String, background: Boolean) {}
+        fun onGmClipboard(text: String) {}
+        fun onGmNotify(title: String, text: String) {}
+        fun onGmDownload(tab: Tab, url: String, name: String) {}
     }
 
     /**
@@ -517,6 +522,7 @@ class Tab(
                 if (legacyInject && listener.shields()) view.evaluateJavascript(Shields.fingerprintJs, null)
                 if (legacyInject) view.evaluateJavascript(geoApproxScript(SitePermissionStore.approxOrigins(incognito)), null)
                 listener.onPageStart(this@Tab)
+                gmFrames.clear(); gmCommands.clear()
                 clearAudio()
                 translated = false
                 trTarget = null
@@ -678,6 +684,8 @@ class Tab(
             }
         }
         installVideoBridge()
+        // 使用者腳本同步讀值（GM_getValue）、讀 @resource；無痕分頁不跑擴充，也不加
+        if (!incognito) w.addJavascriptInterface(UserScripts.Native(), "__oreaGM")
         applyExtensions()
         applyShields(listener.shields())
         applyGeo()
@@ -741,6 +749,11 @@ class Tab(
                 val json = runCatching { JSONObject(message.data ?: return@addWebMessageListener) }.getOrNull() ?: return@addWebMessageListener
                 val type = json.optString("type")
                 // 密碼訊息：只收最上層頁面、https、而且跟目前顯示的網站同一個來源（iframe 或別的網站送來的一律不理）
+                // 使用者腳本的 GM_* 請求：沒有這次開 App 的 token 的一律不理（網頁自己也能呼叫 LiquidBridge）
+                if (type.startsWith("gm_")) {
+                    if (json.optString("token") == UserScripts.token) handleGm(type, json, reply)
+                    return@addWebMessageListener
+                }
                 if (type.startsWith("pw_")) {
                     val origin = "${source.scheme}://${source.host}"
                     if (!mainFrame || source.scheme != "https" || source.host.isNullOrEmpty() || Uri.parse(url).host != source.host) return@addWebMessageListener
@@ -1123,6 +1136,7 @@ class Tab(
         media.clear()
         translated = false
         clearAudio()
+        gmFrames.clear(); gmCommands.clear()
     }
 
     // ── 音訊焦點：哪些框架正在發出聲音（video_detect.js 回報 audio_on／audio_off），App 用它們的回覆通道下指令 ──
@@ -1146,6 +1160,49 @@ class Tab(
     }
 
     /** 換頁、關分頁：舊網頁的框架都不在了 */
+    // ── 使用者腳本 ──
+    /** 頁面選單「使用者腳本指令」：目前網頁上各腳本用 GM_registerMenuCommand 註冊的指令 */
+    val gmCommands = androidx.compose.runtime.mutableStateListOf<UserScripts.MenuCommand>()
+    /** 每個框架、每個腳本註冊的指令（框架＋腳本代號 → 指令）；換頁時清掉 */
+    private val gmFrames = LinkedHashMap<Pair<androidx.webkit.JavaScriptReplyProxy, String>, List<UserScripts.MenuCommand>>()
+
+    private fun handleGm(type: String, json: JSONObject, reply: androidx.webkit.JavaScriptReplyProxy) {
+        when (type) {
+            "gm_set" -> {
+                val sid = json.optString("sid"); val key = json.optString("key")
+                val value = if (json.has("value")) json.optString("value") else null
+                UserScripts.io.execute { UserScripts.setValue(sid, key, value) }
+            }
+            "gm_xhr" -> {
+                val id = json.optString("id")
+                val req = json.optJSONObject("req") ?: return
+                UserScripts.xhr(id, req, url, webView.settings.userAgentString, incognito) { out ->
+                    main.post { if (web != null) runCatching { reply.postMessage(out.toString()) } }
+                }
+            }
+            "gm_abort" -> UserScripts.abort(json.optString("id"))
+            "gm_open" -> json.optString("url").takeIf { it.startsWith("http") }?.let { listener.onGmOpenTab(this, it, json.optBoolean("bg")) }
+            "gm_clip" -> listener.onGmClipboard(json.optString("text"))
+            "gm_note" -> listener.onGmNotify(json.optString("title"), json.optString("text"))
+            "gm_dl" -> json.optString("url").takeIf { it.startsWith("http") }?.let { listener.onGmDownload(this, it, json.optString("name")) }
+            "gm_menu" -> {
+                val sid = json.optString("sid")
+                val script = json.optString("script")
+                val arr = json.optJSONArray("cmds")
+                val cmds = List(arr?.length() ?: 0) { i ->
+                    val c = arr!!.getJSONObject(i)
+                    val cid = c.optString("id")
+                    UserScripts.MenuCommand(script, c.optString("name"), cid) {
+                        runCatching { reply.postMessage(JSONObject().put("gm", "menu").put("id", sid).put("cmd", cid).toString()) }
+                    }
+                }
+                gmFrames[reply to sid] = cmds
+                gmCommands.clear()
+                gmFrames.values.forEach { gmCommands.addAll(it) }
+            }
+        }
+    }
+
     private fun clearAudio() {
         if (audioFrames.isEmpty() && pausedFrames.isEmpty()) return
         audioFrames.clear()

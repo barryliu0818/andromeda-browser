@@ -98,6 +98,8 @@ internal val LA: Map<String, String> = hashMapOf(
     "使用 Orea 核心" to "Machina Orea uti",
     "擴充功能" to "Extensiones",
     "擴展工具管理" to "Extensiones",
+    "使用者腳本指令" to "Iussa scriptorum usoris",
+    "已更新 %1\$s 個使用者腳本" to "Scripta usoris renovata: %1\$s",
     "擴充功能商店" to "Tabernae extensionum",
     "Chrome 線上應用程式商店" to "Chrome Web Store",
     "Firefox 附加元件" to "Additamenta Firefox",

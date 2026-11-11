@@ -44,6 +44,7 @@ object Extensions {
 
     fun init(ctx: Context) {
         root = File(ctx.filesDir, "extensions").apply { mkdirs() }
+        UserScripts.init(root)
         list.clear()
         root.listFiles()?.sortedBy { it.lastModified() }?.forEach { dir -> runCatching { load(dir) }.getOrNull()?.let(list::add) }
     }
@@ -128,17 +129,78 @@ object Extensions {
         // @require 的程式庫（jQuery 等）安裝時一起下載，接在腳本前面
         val required = meta["require"].orEmpty().joinToString("\n;\n") { String(download(it)) }
         File(tmp, "script.user.js").writeText(if (required.isEmpty()) text else "$required\n;\n$text")
+        // @resource 名稱 網址：安裝時下載好（GM_getResourceText／GM_getResourceURL 同步讀取）
+        val resources = meta["resource"].orEmpty().mapNotNull { line ->
+            val parts = line.trim().split(Regex("\\s+"), limit = 2)
+            if (parts.size == 2) parts[0] to parts[1] else null
+        }
+        if (resources.isNotEmpty()) UserScripts.saveResources(tmp, resources, ::download)
         val id = (meta["namespace"]?.firstOrNull() ?: source) + "/" + name
-        File(tmp, META).writeText(JSONObject().put("id", id).put("source", source).put("enabled", true).put("userScript", true).toString())
+        File(tmp, META).writeText(
+            JSONObject().put("id", id).put("source", source).put("enabled", true).put("userScript", true)
+                .put("checked", System.currentTimeMillis()).toString(),
+        )
         return moveInto(tmp, id)
     }
 
     private fun moveInto(tmp: File, id: String): File {
         val dir = File(root, dirName(id))
+        // 更新（重裝同一個腳本）：保留腳本存的值（GM_setValue），也保留原本的開關
+        File(dir, "values.json").takeIf { it.isFile }?.copyTo(File(tmp, "values.json"), overwrite = true)
+        runCatching { JSONObject(File(dir, META).readText()).optBoolean("enabled", true) }.getOrNull()?.let { on ->
+            val m = File(tmp, META)
+            if (!on && m.isFile) m.writeText(JSONObject(m.readText()).put("enabled", false).toString())
+        }
+        UserScripts.forget(dirName(id))
         dir.deleteRecursively()
         if (!tmp.renameTo(dir)) error("無法寫入擴充功能資料夾")
         return dir
     }
+
+    // ---------- 使用者腳本更新（同 Tampermonkey：每天檢查一次 @updateURL，版本較新就下載 @downloadURL 重裝） ----------
+    private const val UPDATE_EVERY_MS = 24L * 3600 * 1000
+
+    /** 檢查所有使用者腳本的更新（背景執行緒）；回傳更新了幾個 */
+    fun checkUpdates(force: Boolean = false): Int {
+        var updated = 0
+        for (ext in list.toList().filter { it.userScript }) {
+            val dir = File(root, dirName(ext.id))
+            val metaFile = File(dir, META)
+            val meta = runCatching { JSONObject(metaFile.readText()) }.getOrNull() ?: continue
+            if (!force && System.currentTimeMillis() - meta.optLong("checked") < UPDATE_EVERY_MS) continue
+            runCatching {
+                val m = userScriptMeta(File(dir, "script.user.js").readText())
+                val source = meta.optString("source")
+                val download = m["downloadURL"]?.firstOrNull()?.takeIf { it.startsWith("http") } ?: source.takeIf { it.startsWith("http") } ?: return@runCatching
+                val check = m["updateURL"]?.firstOrNull()?.takeIf { it.startsWith("http") } ?: download
+                val remote = userScriptMeta(String(download(check)))["version"]?.firstOrNull() ?: return@runCatching
+                if (newerVersion(remote, m["version"]?.firstOrNull().orEmpty())) {
+                    installBytes(download(download), source)
+                    updated++
+                    com.liquid.browser.BugLog.event("extension", "使用者腳本更新：${ext.name} → $remote")
+                }
+            }.onFailure { com.liquid.browser.BugLog.event("extension", "檢查更新失敗 ${ext.name}：$it") }
+            // 重裝後的資料夾是新的：檢查時間記在新的 META
+            runCatching { val f = File(dir, META); f.writeText(JSONObject(f.readText()).put("checked", System.currentTimeMillis()).toString()) }
+        }
+        return updated
+    }
+
+    /** a 比 b 新（點分版本，逐段比數字，數字相同再比文字） */
+    internal fun newerVersion(a: String, b: String): Boolean {
+        val x = a.split('.', '-', '+'); val y = b.split('.', '-', '+')
+        for (i in 0 until maxOf(x.size, y.size)) {
+            val p = x.getOrElse(i) { "0" }; val q = y.getOrElse(i) { "0" }
+            val pn = p.takeWhile(Char::isDigit).toLongOrNull() ?: 0; val qn = q.takeWhile(Char::isDigit).toLongOrNull() ?: 0
+            if (pn != qn) return pn > qn
+            val c = p.dropWhile(Char::isDigit).compareTo(q.dropWhile(Char::isDigit))
+            if (c != 0) return c > 0
+        }
+        return false
+    }
+
+    /** 這個擴充的資料夾名稱（使用者腳本的 GM 儲存也用它當腳本代號） */
+    fun sidOf(ext: Ext) = dirName(ext.id)
 
     private fun dirName(id: String) = java.security.MessageDigest.getInstance("SHA-1").digest(id.toByteArray()).take(8).joinToString("") { "%02x".format(it) }
 
@@ -170,6 +232,7 @@ object Extensions {
     }
 
     fun remove(ext: Ext) {
+        UserScripts.forget(dirName(ext.id))
         File(root, dirName(ext.id)).deleteRecursively()
         list.removeAll { it.id == ext.id }
         onChanged?.invoke()
@@ -268,6 +331,9 @@ object Extensions {
         if (active.isEmpty()) return null
         return buildString {
             append("(function(){if(window.__oreaExt)return;window.__oreaExt=1;var u=location.href,top=window.top===window;")
+            // 使用者腳本跟 App 溝通用的通道：在網頁任何程式執行前就把 LiquidBridge、JSON、__oreaGM 抓進閉包（網頁事後換掉也影響不到），
+            // 每個請求都帶 token；App 的回覆依 gm＋id 分給等待中的回呼
+            if (active.any { it.userScript }) append(gmChannel())
             append("function when(r,f){if(r==='document_start')return f();var go=function(){r==='document_idle'?setTimeout(f,0):f()};")
             append("document.readyState==='loading'?document.addEventListener('DOMContentLoaded',go,{once:true}):go()}")
             append("function css(t){var s=document.createElement('style');s.textContent=t;var p=document.head||document.documentElement;p?p.appendChild(s):document.addEventListener('DOMContentLoaded',function(){document.head.appendChild(s)})}")
@@ -280,8 +346,8 @@ object Extensions {
                     if (s.css.isNotBlank()) append("when('document_start',function(){css(").append(JSONObject.quote(s.css)).append(")});")
                     if (s.js.isNotBlank()) {
                         append("when(").append(JSONObject.quote(s.runAt)).append(",function(){try{")
-                        if (ext.userScript) append("(function(GM_info,GM,GM_addStyle,GM_getValue,GM_setValue,GM_deleteValue,GM_listValues,GM_xmlhttpRequest,GM_openInTab,GM_setClipboard,GM_registerMenuCommand,GM_notification,unsafeWindow){")
-                            .append(s.js).append("\n}).apply(window,").append(gmShim(ext)).append(");")
+                        if (ext.userScript) append("(function(").append(GM_PARAMS).append("){")
+                            .append(s.js).append("\n}).apply(window,").append(gmShim(ext, s.js)).append(");")
                         else append("(function(chrome,browser){").append(s.js).append("\n}).apply(window,(function(){var c=").append(chromeShim(ext)).append(";return[c,c]})());")
                         append("}catch(e){console.error('[Orea 擴充] ").append(ext.name.replace("'", "")).append("',e)}});")
                     }
@@ -315,20 +381,78 @@ return t.replace(/\$(\d)/g,function(_,d){return s[d-1]==null?'':s[d-1]})},getUIL
 extension:{getURL:function(p){return B+String(p).replace(/^\//,'')}}}})()"""
     }
 
-    /** 使用者腳本的 GM_* 函式（值存在網站的 localStorage；GM_xmlhttpRequest 改用 fetch，跨網站時受 CORS 限制） */
-    private fun gmShim(ext: Ext): String {
-        val key = JSONObject.quote("__oreaGM:" + dirName(ext.id))
-        val info = JSONObject().put("script", JSONObject().put("name", ext.name).put("version", ext.version)).put("scriptHandler", "Orea").put("version", "1")
-        return """(function(){var K=$key;function ld(){try{return JSON.parse(localStorage.getItem(K)||'{}')}catch(e){return{}}}function sv(o){try{localStorage.setItem(K,JSON.stringify(o))}catch(e){}}
-var add=function(t){var s=document.createElement('style');s.textContent=t;(function a(){var p=document.head||document.documentElement;p?p.appendChild(s):setTimeout(a,10)})();return s};
-var get=function(k,d){var o=ld();return k in o?o[k]:d},set=function(k,v){var o=ld();o[k]=v;sv(o)},del=function(k){var o=ld();delete o[k];sv(o)},keys=function(){return Object.keys(ld())};
-var xhr=function(d){fetch(d.url,{method:d.method||'GET',headers:d.headers,body:d.data,credentials:d.anonymous?'omit':'include'}).then(function(r){return r.text().then(function(t){var x={status:r.status,statusText:r.statusText,responseText:t,response:t,finalUrl:r.url,readyState:4,responseHeaders:''};
-if(d.responseType==='json'){try{x.response=JSON.parse(t)}catch(e){}}d.onload&&d.onload(x)})}).catch(function(e){d.onerror&&d.onerror(e)});return{abort:function(){}}};
-var open=function(u){return window.open(u,'_blank')},clip=function(t){navigator.clipboard&&navigator.clipboard.writeText(String(t))},menu=function(){},note=function(){};
-var info=$info;var GM={info:info,addStyle:function(t){return Promise.resolve(add(t))},getValue:function(k,d){return Promise.resolve(get(k,d))},setValue:function(k,v){return Promise.resolve(set(k,v))},
-deleteValue:function(k){return Promise.resolve(del(k))},listValues:function(){return Promise.resolve(keys())},xmlHttpRequest:xhr,openInTab:open,setClipboard:clip,registerMenuCommand:menu,notification:note};
-return[info,GM,add,get,set,del,keys,xhr,open,clip,menu,note,window]})()"""
+    /** 使用者腳本函式的參數名稱（腳本裡直接用這些名字，跟 Tampermonkey／Violentmonkey 一樣不必加 window.） */
+    private const val GM_PARAMS = "GM_info,GM,GM_addStyle,GM_getValue,GM_setValue,GM_deleteValue,GM_listValues,GM_xmlhttpRequest," +
+        "GM_openInTab,GM_setClipboard,GM_registerMenuCommand,GM_unregisterMenuCommand,GM_notification,GM_download," +
+        "GM_getResourceText,GM_getResourceURL,GM_addElement,GM_addValueChangeListener,GM_removeValueChangeListener,GM_log," +
+        "GM_getValues,GM_setValues,GM_deleteValues,unsafeWindow"
+
+    /** 開頁時建立的通道（見 documentStartScript）：變數 O */
+    private fun gmChannel(): String = """var O=(function(){var B=window.LiquidBridge,N=window.__oreaGM,S=JSON.stringify,P=JSON.parse,pm=B&&B.postMessage?B.postMessage.bind(B):null,cb={},seq=0,T=TOKEN;
+if(B&&B.addEventListener)B.addEventListener('message',function(e){var m;try{m=P(e.data)}catch(x){return}if(!m||!m.gm)return;var f=cb[m.gm+':'+m.id];if(f)f(m)});
+return{T:T,S:S,P:P,N:N,send:function(o){o.token=T;if(pm)pm(S(o))},on:function(k,f){cb[k]=f},off:function(k){delete cb[k]},id:function(){return(++seq)+'_'+Math.random().toString(36).slice(2)}}})();""".replace("TOKEN", JSONObject.quote(UserScripts.token))
+
+    /**
+     * 使用者腳本的 GM_* 與 GM.*（照 Violentmonkey）：值存在 App（每個腳本一份、所有網站共用）、
+     * GM_xmlhttpRequest 由 App 代發（不受 CORS 限制，預設帶 Cookie）、選單指令列在頁面選單、@resource 安裝時已下載。
+     * 回傳的陣列依 [GM_PARAMS] 的順序
+     */
+    private fun gmShim(ext: Ext, text: String): String {
+        val m = userScriptMeta(text)
+        val script = JSONObject()
+            .put("name", ext.name).put("namespace", m["namespace"]?.firstOrNull().orEmpty()).put("version", ext.version)
+            .put("description", ext.description).put("matches", JSONArray(m["match"].orEmpty())).put("includes", JSONArray(m["include"].orEmpty()))
+            .put("excludes", JSONArray(m["exclude"].orEmpty())).put("grant", JSONArray(m["grant"].orEmpty()))
+            .put("runAt", m["run-at"]?.firstOrNull() ?: "document-end")
+            .put("resources", JSONArray(m["resource"].orEmpty().map { r -> r.trim().split(Regex("\\s+"), limit = 2).let { JSONObject().put("name", it[0]).put("url", it.getOrElse(1) { "" }) } }))
+        val header = text.substringAfter("// ==UserScript==", "").substringBefore("// ==/UserScript==")
+        val info = JSONObject().put("script", script).put("scriptHandler", "Orea").put("version", "1.0").put("scriptMetaStr", header)
+        return GM_SHIM.replace("SID", JSONObject.quote(dirName(ext.id))).replace("INFO", info.toString())
     }
+
+    private const val GM_SHIM = """(function(){var sid=SID,T=O.T,S=O.S,P=O.P,N=O.N,vals={},info=INFO;
+try{vals=P(N.values(T,sid))}catch(e){}
+var lis={},lseq=0;function fire(k,o,n){for(var i in lis){var l=lis[i];if(l.k===k)try{l.f(k,o,n,false)}catch(e){}}}
+var get=function(k,d){if(!(k in vals))return d;try{return P(vals[k])}catch(e){return d}};
+var del=function(k){var o=get(k);delete vals[k];O.send({type:'gm_set',sid:sid,key:String(k)});fire(k,o,undefined)};
+var set=function(k,v){var o=get(k),j=S(v);if(j===undefined)return del(k);vals[k]=j;O.send({type:'gm_set',sid:sid,key:String(k),value:j});fire(k,o,v)};
+var keys=function(){return Object.keys(vals)};
+var gets=function(ks){var o={},arr=Array.isArray(ks);(arr?ks:Object.keys(ks||{})).forEach(function(k){o[k]=get(k,arr?undefined:ks[k])});return o};
+var sets=function(o){for(var k in o)set(k,o[k])},dels=function(ks){(ks||[]).forEach(del)};
+var place=function(e,p){(function a(){var q=p||document.head||document.body||document.documentElement;q?q.appendChild(e):setTimeout(a,10)})();return e};
+var add=function(t){var s=document.createElement('style');s.textContent=t;return place(s)};
+var addEl=function(p,tag,a){if(typeof p==='string'){a=tag;tag=p;p=null}var e=document.createElement(tag);for(var k in a||{}){if(k==='textContent')e.textContent=a[k];else e.setAttribute(k,a[k])}return place(e,p)};
+function b64(a){var u=new Uint8Array(a),s='';for(var i=0;i<u.length;i+=32768)s+=String.fromCharCode.apply(null,u.subarray(i,i+32768));return btoa(s)}
+var xhr=function(d){var id=O.id(),q={method:d.method,url:String(d.url),headers:d.headers,responseType:d.responseType,timeout:d.timeout,anonymous:d.anonymous,overrideMimeType:d.overrideMimeType};
+var go=function(){O.on('xhr:'+id,function(m){O.off('xhr:'+id);var r={readyState:4,status:m.status||0,statusText:m.statusText||'',finalUrl:m.finalUrl||d.url,responseHeaders:m.responseHeaders||'',context:d.context};
+if(m.type==='load'){if(m.bodyB64!=null){var bin=atob(m.bodyB64),u=new Uint8Array(bin.length);for(var i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);r.response=d.responseType==='blob'?new Blob([u],{type:m.mime||''}):u.buffer;r.responseText=''}
+else{var t=m.text||'';r.responseText=t;r.response=t;if(d.responseType==='json'){try{r.response=P(t)}catch(e){r.response=null}}else if(d.responseType==='document'){try{r.response=new DOMParser().parseFromString(t,(m.mime||'text/html').split(';')[0].trim()||'text/html')}catch(e){}}
+Object.defineProperty(r,'responseXML',{get:function(){try{return new DOMParser().parseFromString(t,'text/xml')}catch(e){return null}}})}
+d.onreadystatechange&&d.onreadystatechange(r);d.onprogress&&d.onprogress(r);d.onload&&d.onload(r)}
+else if(m.type==='timeout'){d.ontimeout&&d.ontimeout(r)}else if(m.type==='abort'){d.onabort&&d.onabort(r)}else{r.error=m.error;d.onerror&&d.onerror(r)}
+d.onloadend&&d.onloadend(r)});O.send({type:'gm_xhr',id:id,req:q})};
+var data=d.data,h=function(o){q.headers=Object.assign({},q.headers||{},o)};
+if(data==null)go();else if(typeof data==='string'){q.data=data;go()}
+else if(typeof URLSearchParams!=='undefined'&&data instanceof URLSearchParams){q.data=data.toString();h({'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'});go()}
+else if(typeof FormData!=='undefined'&&data instanceof FormData){var b=new Response(data);h({'Content-Type':b.headers.get('Content-Type')});b.arrayBuffer().then(function(a){q.dataB64=b64(a);go()})}
+else if(data instanceof Blob||data instanceof ArrayBuffer||ArrayBuffer.isView(data)){(data instanceof Blob?data.arrayBuffer():Promise.resolve(data.buffer||data)).then(function(a){q.dataB64=b64(a);go()})}
+else{q.data=S(data);go()}
+return{abort:function(){O.send({type:'gm_abort',id:id})}}};
+var open=function(u,o){var bg=typeof o==='boolean'?o:!!(o&&(o.active===false||o.loadInBackground));O.send({type:'gm_open',url:new URL(u,location.href).href,bg:bg});return{close:function(){},closed:false,onclose:null}};
+var clip=function(t){O.send({type:'gm_clip',text:String(t)})};
+var menus={},mseq=0,sync=function(){var a=[];for(var k in menus)a.push({id:k,name:menus[k].n});O.send({type:'gm_menu',sid:sid,script:info.script.name,cmds:a})};
+O.on('menu:'+sid,function(m){var c=menus[m.cmd];if(c)try{c.f()}catch(e){console.error(e)}});
+var reg=function(n,f){var id=String(++mseq);menus[id]={n:String(n),f:f};sync();return id},unreg=function(id){delete menus[id];sync()};
+var note=function(a,b){var o=typeof a==='object'&&a?a:{text:a,title:b};O.send({type:'gm_note',title:o.title||info.script.name,text:String(o.text||'')});o.ondone&&setTimeout(o.ondone,0)};
+var dl=function(a,b){var o=typeof a==='object'&&a?a:{url:a,name:b};O.send({type:'gm_dl',url:new URL(o.url,location.href).href,name:o.name||''});o.onload&&setTimeout(o.onload,0)};
+var resT=function(n){try{return N.resource(T,sid,n,false)}catch(e){return null}},resU=function(n){try{return N.resource(T,sid,n,true)}catch(e){return null}};
+var addL=function(k,f){var id=++lseq;lis[id]={k:k,f:f};return id},remL=function(id){delete lis[id]};
+var pr=function(f){return function(){var a=arguments;return new Promise(function(ok,no){try{ok(f.apply(null,a))}catch(e){no(e)}})}};
+var GM={info:info,addStyle:pr(add),addElement:pr(addEl),getValue:pr(get),setValue:pr(set),deleteValue:pr(del),listValues:pr(keys),getValues:pr(gets),setValues:pr(sets),deleteValues:pr(dels),
+xmlHttpRequest:function(d){var c,p=new Promise(function(ok,no){c=xhr(Object.assign({},d,{onload:function(r){d.onload&&d.onload(r);ok(r)},onerror:function(r){d.onerror&&d.onerror(r);no(r)},ontimeout:function(r){d.ontimeout&&d.ontimeout(r);no(r)},onabort:function(r){d.onabort&&d.onabort(r);no(r)}}))});p.abort=function(){c&&c.abort()};return p},
+openInTab:open,setClipboard:pr(clip),registerMenuCommand:reg,unregisterMenuCommand:unreg,notification:pr(note),download:pr(dl),getResourceText:pr(resT),getResourceUrl:pr(resU),getResourceURL:pr(resU),
+addValueChangeListener:addL,removeValueChangeListener:remL,log:console.log.bind(console)};
+return[info,GM,add,get,set,del,keys,xhr,open,clip,reg,unreg,note,dl,resT,resU,addEl,addL,remL,console.log.bind(console),gets,sets,dels,window]})()"""
 
     /** chrome.runtime.getURL() 的資源：從擴充資料夾讀檔（只回應已安裝擴充、而且在資料夾裡的檔案） */
     fun resource(url: Uri): WebResourceResponse? {

@@ -21,6 +21,19 @@ class PureLogicTest {
     }
 
     @Test
+    fun userScriptVersions() {
+        // 使用者腳本更新：遠端版本較新才重裝
+        assertTrue(Extensions.newerVersion("1.10", "1.9"))
+        assertTrue(Extensions.newerVersion("2.0", "1.99.9"))
+        assertTrue(Extensions.newerVersion("1.0.1", "1.0"))
+        assertTrue(Extensions.newerVersion("2024.11.10", "2024.9.30"))
+        assertTrue(!Extensions.newerVersion("1.0", "1.0"))
+        assertTrue(!Extensions.newerVersion("1.0", "1.0.0"))
+        assertTrue(!Extensions.newerVersion("1.2", "1.10"))
+        assertTrue(Extensions.newerVersion("1.0b", "1.0a"))
+    }
+
+    @Test
     fun baseDomainDistinguishesSites() {
         // 跳轉阻擋：同一個網站的子網域不算跳出去，不同網站要算
         assertEquals(baseDomain("m.youtube.com"), baseDomain("www.youtube.com"))

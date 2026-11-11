@@ -95,6 +95,8 @@ internal val IT: Map<String, String> = hashMapOf(
     "使用 Orea 核心" to "Usa il motore Orea",
     "擴充功能" to "Estensioni",
     "擴展工具管理" to "Estensioni",
+    "使用者腳本指令" to "Comandi degli script utente",
+    "已更新 %1\$s 個使用者腳本" to "Script utente aggiornati: %1\$s",
     "擴充功能商店" to "Store di estensioni",
     "Chrome 線上應用程式商店" to "Chrome Web Store",
     "Firefox 附加元件" to "Componenti aggiuntivi di Firefox",

@@ -316,6 +316,22 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         private set
     private val offeredExt = mutableSetOf<String>()
 
+    // ── 使用者腳本要 App 做的事（GM_openInTab、GM_setClipboard、GM_notification、GM_download）──
+    override fun onGmOpenTab(tab: Tab, url: String, background: Boolean) { newTab(url, incognito = tab.incognito, background = background) }
+
+    override fun onGmClipboard(text: String) {
+        val cm = getApplication<Application>().getSystemService(android.content.ClipboardManager::class.java)
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("", text))
+        showToast(t("已拷貝"))
+    }
+
+    override fun onGmNotify(title: String, text: String) { showToast(if (text.isBlank()) title else "$title：$text") }
+
+    override fun onGmDownload(tab: Tab, url: String, name: String) {
+        val task = download(tab, url, name.ifBlank { android.webkit.URLUtil.guessFileName(url, null, null) })
+        showToast(if (task != null) t("開始下載「%1\$s」", task.name) else t("無法下載此類型的檔案"))
+    }
+
     override fun onExtensionOffer(tab: Tab, url: String) {
         if (tab != current || !offeredExt.add(url)) return
         extOffer = tab to url
@@ -391,6 +407,12 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         Extensions.init(app)
         // 安裝在背景執行緒完成：重新註冊開頁腳本要回到主執行緒（WebView 只能在主執行緒操作）
         Extensions.onChanged = { viewModelScope.launch(Dispatchers.Main) { tabs.forEach { it.applyExtensions() } } }
+        // 使用者腳本更新：開 App 一會兒後在背景檢查（每個腳本一天最多檢查一次，同 Tampermonkey）
+        viewModelScope.launch(Dispatchers.IO) {
+            delay(30_000)
+            val n = runCatching { Extensions.checkUpdates() }.getOrDefault(0)
+            if (n > 0) withContext(Dispatchers.Main) { showToast(t("已更新 %1\$s 個使用者腳本", n)) }
+        }
         // 「識別為 iPhone」設定改變時套用到所有已開啟的分頁
         viewModelScope.launch {
             settings.map { it.identifyAsIPhone }.distinctUntilChanged().collect { on -> tabs.forEach { it.setIdentifyAsIPhone(on) } }

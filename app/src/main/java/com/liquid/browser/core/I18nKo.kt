@@ -95,6 +95,8 @@ internal val KO: Map<String, String> = hashMapOf(
     "使用 Orea 核心" to "Orea 엔진 사용",
     "擴充功能" to "확장 프로그램",
     "擴展工具管理" to "확장 프로그램",
+    "使用者腳本指令" to "사용자 스크립트 명령",
+    "已更新 %1\$s 個使用者腳本" to "업데이트된 사용자 스크립트: %1\$s",
     "擴充功能商店" to "확장 프로그램 스토어",
     "Chrome 線上應用程式商店" to "Chrome 웹 스토어",
     "Firefox 附加元件" to "Firefox 부가 기능",
