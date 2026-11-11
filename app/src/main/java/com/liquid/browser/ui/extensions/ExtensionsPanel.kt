@@ -86,6 +86,17 @@ fun ExtensionsPanel(vm: BrowserViewModel, tone: Tone, onOpenStore: (String) -> U
                 onClick = { Extensions.setEnabled(e, !e.enabled) },
             )
         }
+        if (exts.any { it.userScript }) item(key = "ext-tm") {
+            GroupHeader(t("使用者腳本"), tone)
+            val on = Extensions.asTampermonkey
+            GroupRow(
+                0, 1, tone, t("以 Tampermonkey 名義執行"),
+                leading = { IconTile("badge", Color(0xFF8E8E93)) },
+                trailing = { IosSwitch(on, tone) { Extensions.useTampermonkeyName(it) } },
+                onClick = { Extensions.useTampermonkeyName(!on) },
+            )
+            GroupFooter(t("有些需要會員的腳本只在 Tampermonkey 裡執行。打開後，腳本看到的管理器名稱會是 Tampermonkey。綁定會員請在網站上開啟頁面選單 → 使用者腳本指令"))
+        }
         item(key = "ext-install") {
             GroupHeader(t("安裝"), tone)
             Column(Modifier.fillMaxWidth().groupItem(0, 1, tone).padding(horizontal = 16.dp, vertical = 6.dp)) {

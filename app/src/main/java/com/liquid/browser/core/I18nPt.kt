@@ -96,6 +96,8 @@ internal val PT: Map<String, String> = hashMapOf(
     "擴充功能" to "Extensões",
     "擴展工具管理" to "Extensões",
     "使用者腳本指令" to "Comandos de scripts do usuário",
+    "以 Tampermonkey 名義執行" to "Executar como Tampermonkey",
+    "有些需要會員的腳本只在 Tampermonkey 裡執行。打開後，腳本看到的管理器名稱會是 Tampermonkey。綁定會員請在網站上開啟頁面選單 → 使用者腳本指令" to "Alguns scripts pagos só funcionam no Tampermonkey. Quando ativado, os scripts veem o Tampermonkey como gerenciador. Para vincular a assinatura, abra o site e vá em Menu da página → Comandos de scripts do usuário",
     "已更新 %1\$s 個使用者腳本" to "Scripts do usuário atualizados: %1\$s",
     "擴充功能商店" to "Lojas de extensões",
     "Chrome 線上應用程式商店" to "Chrome Web Store",

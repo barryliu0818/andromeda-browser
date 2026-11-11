@@ -223,7 +223,8 @@ class Tab(
         extHandler = WebViewCompat.addDocumentStartJavaScript(w, js, setOf("*"))
     }
     /** 目前實際套用的是否為 Apple 身分（個別網站例外時與 asIPhone 不同） */
-    private var appliedIos: Boolean? = null
+    // 目前套用的身分（Apple？／桌面？）：換到身分不同的網站前要先切換
+    private var appliedIdentity: String? = null
 
     /** 這個網址要不要用 Apple 身分：asIPhone 開著、且不在例外清單（[NO_IOS_HOSTS]） */
     private fun iosFor(url: String?): Boolean {
@@ -232,9 +233,14 @@ class Tab(
         return NO_IOS_HOSTS.none { host == it || host.endsWith(".$it") }
     }
 
+    /** Chrome 線上應用程式商店只給桌面 Chrome 看（手機版只顯示「僅適用於桌面版」）：這個網站一律用桌面 Chrome 身分 */
+    private fun desktopOnly(url: String?) = url?.let { Uri.parse(it).host } == CWS_HOST
+
+    private fun identityOf(url: String?) = "${iosFor(url)}/${desktop || desktopOnly(url)}"
+
     /** 換到身分不同的網站前先切換（UA 在請求送出前就要對）；回傳是否有切換 */
     private fun switchIdentityFor(url: String): Boolean {
-        if (iosFor(url) == appliedIos) return false
+        if (identityOf(url) == appliedIdentity) return false
         applyIdentity(reload = false, forUrl = url)
         return true
     }
@@ -849,10 +855,11 @@ class Tab(
      */
     private fun applyIdentity(reload: Boolean, forUrl: String? = url) {
         // 還沒建立 WebView：建立時會用當下的設定再套一次
-        if (web == null) { appliedIos = null; return }
+        if (web == null) { appliedIdentity = null; return }
         val ctx = webView.context
         val asIPhone = iosFor(forUrl)
-        appliedIos = asIPhone
+        val desktop = desktop || desktopOnly(forUrl)
+        appliedIdentity = identityOf(forUrl)
         webView.settings.userAgentString = when {
             asIPhone && desktop -> MAC_SAFARI_UA
             asIPhone -> IPHONE_SAFARI_UA
@@ -875,7 +882,12 @@ class Tab(
                     .setModel("")
                     .build(),
             )
-            else WebSettingsCompat.setUserAgentMetadata(webView.settings, UserAgentMetadata.Builder().build())
+            // 桌面版：navigator.userAgentData.mobile 也要是 false（Chrome 線上應用程式商店看這個判斷手機）
+            else WebSettingsCompat.setUserAgentMetadata(
+                webView.settings,
+                if (desktop) UserAgentMetadata.Builder().setMobile(false).setPlatform("Linux").setPlatformVersion("").setModel("").build()
+                else UserAgentMetadata.Builder().build(),
+            )
         }
         // 頁面 JS 讀到的 navigator.platform／vendor 也改成 Apple；Safari 沒有 userAgentData
         iosShim?.remove()
@@ -1130,7 +1142,7 @@ class Tab(
         (w.parent as? ViewGroup)?.removeView(w)
         runCatching { w.destroy() }
         iosShim = null; extHandler = null; shieldsHandler = null; geoHandler = null
-        appliedIos = null
+        appliedIdentity = null
         legacyInject = false
         pageShots.clear()
         media.clear()
@@ -1333,7 +1345,8 @@ private const val END_SPACER_JS = """(function(){
  * 「識別為 iPhone」的例外網站（像 Firefox 的個別網站相容性處理）：這些網站用真實的 Android 身分。
  * YouTube：防機器人權杖是在 Chromium 環境產生的，跟 iPhone 身分對不上 → 字幕檔回傳空白、全螢幕走 iPhone 路線只放大 <video>
  */
-private val NO_IOS_HOSTS = listOf("youtube.com", "youtube-nocookie.com", "youtu.be")
+private const val CWS_HOST = "chromewebstore.google.com"
+private val NO_IOS_HOSTS = listOf("youtube.com", "youtube-nocookie.com", "youtu.be", CWS_HOST)
 
 const val IPHONE_SAFARI_UA =
     "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1"

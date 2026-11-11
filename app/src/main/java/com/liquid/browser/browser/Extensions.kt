@@ -3,7 +3,10 @@ package com.liquid.browser.browser
 import android.content.Context
 import android.net.Uri
 import android.webkit.WebResourceResponse
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
@@ -26,6 +29,8 @@ object Extensions {
         val id: String, val name: String, val version: String, val description: String,
         val userScript: Boolean, val source: String, val scripts: List<Script>,
         val messages: JSONObject, val manifest: JSONObject, val enabled: Boolean,
+        /** 使用者腳本的固定編號（GM_info.script.uuid）：安裝時產生，更新後不變 */
+        val uuid: String = "",
     )
 
     /** 已安裝的擴充（設定頁顯示） */
@@ -42,8 +47,21 @@ object Extensions {
     private const val MAX_BYTES = 30 * 1024 * 1024
     private lateinit var root: File
 
+    /** 使用者腳本的 GM_info 自稱 Tampermonkey（記號檔存在＝開） */
+    var asTampermonkey by mutableStateOf(false)
+        private set
+    private const val TM_VERSION = "5.3.3"
+    private val tmFlag get() = File(root, ".as_tampermonkey")
+
+    fun useTampermonkeyName(on: Boolean) {
+        if (on) tmFlag.writeText("1") else tmFlag.delete()
+        asTampermonkey = on
+        onChanged?.invoke()
+    }
+
     fun init(ctx: Context) {
         root = File(ctx.filesDir, "extensions").apply { mkdirs() }
+        asTampermonkey = tmFlag.exists()
         UserScripts.init(root)
         list.clear()
         root.listFiles()?.sortedBy { it.lastModified() }?.forEach { dir -> runCatching { load(dir) }.getOrNull()?.let(list::add) }
@@ -138,7 +156,7 @@ object Extensions {
         val id = (meta["namespace"]?.firstOrNull() ?: source) + "/" + name
         File(tmp, META).writeText(
             JSONObject().put("id", id).put("source", source).put("enabled", true).put("userScript", true)
-                .put("checked", System.currentTimeMillis()).toString(),
+                .put("checked", System.currentTimeMillis()).put("uuid", java.util.UUID.randomUUID().toString()).toString(),
         )
         return moveInto(tmp, id)
     }
@@ -147,9 +165,15 @@ object Extensions {
         val dir = File(root, dirName(id))
         // 更新（重裝同一個腳本）：保留腳本存的值（GM_setValue），也保留原本的開關
         File(dir, "values.json").takeIf { it.isFile }?.copyTo(File(tmp, "values.json"), overwrite = true)
-        runCatching { JSONObject(File(dir, META).readText()).optBoolean("enabled", true) }.getOrNull()?.let { on ->
+        // 也保留原本的開關與固定編號（綁定會員的腳本靠編號認機器，更新後變了就要重新激活）
+        runCatching { JSONObject(File(dir, META).readText()) }.getOrNull()?.let { old ->
             val m = File(tmp, META)
-            if (!on && m.isFile) m.writeText(JSONObject(m.readText()).put("enabled", false).toString())
+            if (m.isFile) {
+                val n = JSONObject(m.readText())
+                if (!old.optBoolean("enabled", true)) n.put("enabled", false)
+                old.optString("uuid").takeIf { it.isNotEmpty() }?.let { n.put("uuid", it) }
+                m.writeText(n.toString())
+            }
         }
         UserScripts.forget(dirName(id))
         dir.deleteRecursively()
@@ -247,6 +271,8 @@ object Extensions {
         val id = meta.getString("id")
         val enabled = meta.optBoolean("enabled", true)
         if (meta.optBoolean("userScript")) {
+            // 舊版安裝的腳本沒有編號：補一個寫回去
+            val uuid = meta.optString("uuid").ifEmpty { java.util.UUID.randomUUID().toString().also { runCatching { File(dir, META).writeText(meta.put("uuid", it).toString()) } } }
             val text = File(dir, "script.user.js").readText()
             val m = userScriptMeta(text)
             val matches = m["match"].orEmpty().mapNotNull(::matchPattern) + m["include"].orEmpty().mapNotNull(::globOrRegex)
@@ -255,7 +281,7 @@ object Extensions {
             return Ext(
                 id, m["name"]?.firstOrNull().orEmpty(), m["version"]?.firstOrNull().orEmpty(), m["description"]?.firstOrNull().orEmpty(),
                 true, meta.optString("source"), listOf(Script(matches, excludes, text, "", runAt, m.containsKey("noframes").not())),
-                JSONObject(), JSONObject().put("name", m["name"]?.firstOrNull()).put("version", m["version"]?.firstOrNull()), enabled,
+                JSONObject(), JSONObject().put("name", m["name"]?.firstOrNull()).put("version", m["version"]?.firstOrNull()), enabled, uuid,
             )
         }
         val manifest = JSONObject(File(dir, "manifest.json").readText())
@@ -406,7 +432,11 @@ return{T:T,S:S,P:P,N:N,send:function(o){o.token=T;if(pm)pm(S(o))},on:function(k,
             .put("runAt", m["run-at"]?.firstOrNull() ?: "document-end")
             .put("resources", JSONArray(m["resource"].orEmpty().map { r -> r.trim().split(Regex("\\s+"), limit = 2).let { JSONObject().put("name", it[0]).put("url", it.getOrElse(1) { "" }) } }))
         val header = text.substringAfter("// ==UserScript==", "").substringBefore("// ==/UserScript==")
-        val info = JSONObject().put("script", script).put("scriptHandler", "Orea").put("version", "1.0").put("scriptMetaStr", header)
+        script.put("uuid", ext.uuid)
+        // 有些付費腳本只認 Tampermonkey：開了「以 Tampermonkey 名義執行」就照 Tampermonkey 的名稱與版本回報
+        val info = JSONObject().put("script", script).put("uuid", ext.uuid).put("scriptMetaStr", header)
+            .put("scriptHandler", if (asTampermonkey) "Tampermonkey" else "Orea").put("version", if (asTampermonkey) TM_VERSION else "1.0")
+            .put("scriptWillUpdate", true).put("isIncognito", false)
         return GM_SHIM.replace("SID", JSONObject.quote(dirName(ext.id))).replace("INFO", info.toString())
     }
 

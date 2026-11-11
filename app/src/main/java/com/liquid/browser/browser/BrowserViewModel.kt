@@ -335,9 +335,12 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     override fun onExtensionOffer(tab: Tab, url: String) {
         if (tab != current || !offeredExt.add(url)) return
         extOffer = tab to url
+        // 停在這個擴充功能頁面就一直問（商店的「加到 Chrome」按鈕在 Orea 按不了，錯過就沒得裝）；離開頁面或換分頁才收起
         viewModelScope.launch {
-            delay(10_000)
-            if (extOffer?.second == url) extOffer = null
+            while (extOffer?.second == url) {
+                delay(1_000)
+                if (extOffer?.second == url && (tab != current || tab.url != url)) extOffer = null
+            }
         }
     }
 

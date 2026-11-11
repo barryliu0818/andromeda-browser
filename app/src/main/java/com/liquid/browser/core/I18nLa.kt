@@ -99,6 +99,8 @@ internal val LA: Map<String, String> = hashMapOf(
     "擴充功能" to "Extensiones",
     "擴展工具管理" to "Extensiones",
     "使用者腳本指令" to "Iussa scriptorum usoris",
+    "以 Tampermonkey 名義執行" to "Ut Tampermonkey currere",
+    "有些需要會員的腳本只在 Tampermonkey 裡執行。打開後，腳本看到的管理器名稱會是 Tampermonkey。綁定會員請在網站上開啟頁面選單 → 使用者腳本指令" to "Quaedam scripta pretiosa solum in Tampermonkey currunt. Si activum est, scripta Tampermonkey ut administratorem vident. Ad sodalitatem iungendam, situm aperi, deinde Index paginae → Iussa scriptorum usoris",
     "已更新 %1\$s 個使用者腳本" to "Scripta usoris renovata: %1\$s",
     "擴充功能商店" to "Tabernae extensionum",
     "Chrome 線上應用程式商店" to "Chrome Web Store",

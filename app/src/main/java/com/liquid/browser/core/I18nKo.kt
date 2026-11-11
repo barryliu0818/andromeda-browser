@@ -96,6 +96,8 @@ internal val KO: Map<String, String> = hashMapOf(
     "擴充功能" to "확장 프로그램",
     "擴展工具管理" to "확장 프로그램",
     "使用者腳本指令" to "사용자 스크립트 명령",
+    "以 Tampermonkey 名義執行" to "Tampermonkey로 실행",
+    "有些需要會員的腳本只在 Tampermonkey 裡執行。打開後，腳本看到的管理器名稱會是 Tampermonkey。綁定會員請在網站上開啟頁面選單 → 使用者腳本指令" to "일부 유료 스크립트는 Tampermonkey에서만 실행됩니다. 켜면 스크립트에는 관리자가 Tampermonkey로 보입니다. 멤버십 연결은 사이트를 연 뒤 페이지 메뉴 → 사용자 스크립트 명령에서 하세요",
     "已更新 %1\$s 個使用者腳本" to "업데이트된 사용자 스크립트: %1\$s",
     "擴充功能商店" to "확장 프로그램 스토어",
     "Chrome 線上應用程式商店" to "Chrome 웹 스토어",
