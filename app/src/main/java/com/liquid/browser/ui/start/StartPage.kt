@@ -264,6 +264,8 @@ private fun FavoritesPage(
     val showAll = { page: Int -> scope.launch { pager.animateScrollToPage(page, animationSpec = Motion.glass()) }; Unit }
     val frequent by remember(sites) { vm.frequentSites(sites) }.collectAsState(emptyList())
     val blocked by vm.blockedTotal.collectAsState()
+    // 沒開過的網站也自動抓圖示（不然只有字母方塊）
+    LaunchedEffect(sites, frequent) { vm.ensureIcons(sites + frequent) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = padding) {
         item(key = "fav") {
             // 跟書籤、閱讀列表、歷史紀錄頁同樣的大標題：左右滑動切換時標題不會一下大一下小

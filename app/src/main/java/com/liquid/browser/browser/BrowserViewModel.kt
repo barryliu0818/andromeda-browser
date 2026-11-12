@@ -760,6 +760,25 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         }
     }
 
+    /** 這次開 App 已經找過圖示的網域（找不到的也記著，不一直重試） */
+    private val iconTried = HashSet<String>()
+
+    /**
+     * 起始頁上還沒有圖示的網站：在背景去網站找圖示（不用先開過那個網站）。
+     * 子網域沒有、主網域有的也算有（SiteIcon 會用主網域的）
+     */
+    fun ensureIcons(sites: List<Visit>) {
+        val have = icons.value
+        val ua = android.webkit.WebSettings.getDefaultUserAgent(getApplication())
+        for (s in sites) {
+            val host = favHost(s.url)
+            if (host.isEmpty() || !s.url.startsWith("http") || host in have || baseDomain(host) in have || !iconTried.add(host)) continue
+            viewModelScope.launch(Dispatchers.IO) {
+                IconFetcher.find(s.url, ua)?.let { db.icons().upsert(SiteIcon(host, it)) }
+            }
+        }
+    }
+
     override fun onIcon(host: String, iconUrl: String) {
         if (icons.value[host] == iconUrl) return
         viewModelScope.launch { db.icons().upsert(SiteIcon(host, iconUrl)) }
