@@ -103,6 +103,8 @@ import coil3.compose.AsyncImagePainter
 import android.os.Build
 import androidx.compose.ui.draw.blur
 import coil3.compose.rememberAsyncImagePainter
+import coil3.request.allowHardware
+import coil3.request.transformations
 import com.liquid.browser.browser.BrowserViewModel
 import com.liquid.browser.browser.Visit
 import com.liquid.browser.core.Dimens
@@ -588,7 +590,12 @@ fun SiteIcon(host: String, icons: Map<String, String>, size: Dp, radius: Dp) {
     val shape = RoundedCornerShape(radius)
     // 子網域沒有自己的圖示時用主網域的（m.youtube.com 用 youtube.com 的）
     val url = icons[host] ?: icons[com.liquid.browser.browser.baseDomain(host)]
-    val painter = rememberAsyncImagePainter(url)
+    val ctx = LocalContext.current
+    // 統一圖案大小（見 IconNormalize）；要讀像素，不用硬體點陣圖
+    val request = remember(url) {
+        coil3.request.ImageRequest.Builder(ctx).data(url).allowHardware(false).transformations(com.liquid.browser.ui.IconNormalize).build()
+    }
+    val painter = rememberAsyncImagePainter(request)
     val state by painter.state.collectAsState()
     // Coil 需要先繪製一次才知道尺寸並開始載入，所以圖片永遠繪製，成功前以首字母方塊蓋住
     Box(Modifier.size(size).clip(shape).background(Color.White), Alignment.Center) {
