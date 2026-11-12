@@ -69,6 +69,9 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         private set
     var incognitoMode by mutableStateOf(false)
 
+    /** 無痕分頁已鎖定（設定「離開 App 時鎖定無痕分頁」開著、離開 App 時有無痕分頁）：要驗證才看得到 */
+    var incognitoLocked by mutableStateOf(false)
+
     val settingsStore = SettingsStore(app)
     /**
      * 設定。初始值等 DataStore 讀完（通常十幾毫秒，最多等 500ms）：以前先用預設值，重開 App 還原分頁時

@@ -363,6 +363,19 @@ fun SettingsContent(vm: BrowserViewModel, tone: Tone) {
         }
         item { GroupFooter(t("無痕分頁一律阻擋已知追蹤器、封鎖第三方 Cookie、移除網址追蹤參數。個別網站可在「網站設定」關閉廣告阻擋；網站設定也會顯示安全性檢查結果")) }
 
+        // 無痕瀏覽（Chrome「離開時鎖定無痕分頁」、Brave／Chrome「允許在無痕分頁截圖」）
+        item { GroupHeader(t("無痕瀏覽"), tone) }
+        item {
+            GroupToggle(0, 2, tone, t("離開 App 時鎖定無痕分頁"), s.lockIncognito, subtitle = t("回來時要用指紋或螢幕鎖解鎖"), leading = { IconTile("lock", Color(0xFF5856D6)) }) { v ->
+                vm.updateSettings { it.copy(lockIncognito = v) }
+            }
+        }
+        item {
+            GroupToggle(1, 2, tone, t("允許在無痕分頁截圖"), s.incognitoScreenshots, subtitle = t("關閉時不能截圖，最近使用的 App 畫面也不顯示內容"), leading = { IconTile("photo_camera", Color(0xFF8E8E93)) }) { v ->
+                vm.updateSettings { it.copy(incognitoScreenshots = v) }
+            }
+        }
+
         // 網站權限（Brave：設定 → 網站設定 → 位置／相機／麥克風）：預設「先詢問」或「封鎖」，下面列出個別網站的例外
         item { GroupHeader(t("網站權限"), tone) }
         val kinds = com.liquid.browser.browser.SiteKind.entries

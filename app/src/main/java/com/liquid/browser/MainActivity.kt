@@ -136,6 +136,12 @@ class MainActivity : ComponentActivity() {
                 vm.localNetworkRequest?.let { tab -> if (granted) tab.webView.reload() else vm.showToast(t("未允許存取區域網路")) }
                 vm.localNetworkRequest = null
             }
+            // 無痕分頁不能截圖、最近使用的 App 畫面不顯示內容（Brave／Chrome 的預設；設定可允許截圖）
+            val secure = (vm.incognitoMode || vm.current?.incognito == true) && !settings.incognitoScreenshots
+            LaunchedEffect(secure) {
+                if (secure) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+                else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+            }
             // 下載引擎的通知列進度：第一次開始下載時要求通知權限（拒絕也能下載，只是不顯示通知）
             val notif = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
             val hasDownloads = com.liquid.browser.browser.DownloadEngine.tasks.isNotEmpty()
@@ -177,6 +183,11 @@ class MainActivity : ComponentActivity() {
                     // 播放器開著時，瀏覽畫面的系統模糊小視窗（網址列、起始頁的分段鈕）全部收起，否則會浮在播放器上面
                     if (!vm.inPip) CompositionLocalProvider(com.liquid.browser.ui.glass.LocalHideBlurWindows provides (player != null)) { BrowserScreen(vm) }
                     player?.let { PlayerScreen(it, vm.inPip, onVideoBounds = { r -> vm.videoBounds = r }, onDownload = { vm.downloadVideo(it.request) }, onClose = vm::closePlayer) }
+                    // 無痕分頁已鎖定：蓋住整個畫面，驗證後才看得到（也可以切回一般分頁）
+                    if (vm.incognitoLocked && vm.incognitoMode) com.liquid.browser.ui.browser.IncognitoLock(
+                        onUnlock = { com.liquid.browser.browser.Auth.request(this@MainActivity, t("解鎖無痕分頁")) { vm.incognitoLocked = false } },
+                        onNormal = { vm.tabs.lastOrNull { !it.incognito }?.let(vm::select) ?: vm.newTab(incognito = false) },
+                    )
                 }
             }
             }
@@ -286,6 +297,8 @@ class MainActivity : ComponentActivity() {
         super.onStop()
         vm.saveSession()
         refresh.release()
+        // 離開 App 時鎖定無痕分頁（Chrome 的作法）：回來看無痕分頁要先驗證
+        if (vm.settings.value.lockIncognito && vm.tabs.any { it.incognito }) vm.incognitoLocked = true
         // 背景時暫停目前網頁的動畫與額外處理（不暫停 JavaScript，背景播放的音樂不受影響）
         if (!isInPictureInPictureMode) vm.current?.webView?.onPause()
         // 關掉子母畫面視窗或一般離開 App：暫停播放

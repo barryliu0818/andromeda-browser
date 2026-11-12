@@ -45,6 +45,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -227,14 +228,50 @@ private fun GlassSegments(pager: PagerState, haze: dev.chrisbanes.haze.HazeState
 /** 無痕起始頁（Safari 私密瀏覽）：舉手圖示＋說明 */
 @Composable
 private fun IncognitoNote(content: Color, padding: PaddingValues) {
-    Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Sym("back_hand", content.copy(alpha = 0.55f), 52.dp)
-        Text(t("無痕瀏覽"), Modifier.padding(top = 14.dp), color = content.copy(alpha = 0.75f), fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+    // 照 Brave／Chrome 的無痕新分頁：說清楚哪些不會保存、哪些人仍然看得到（無痕不等於匿名）
+    Column(
+        Modifier.fillMaxSize().verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(padding).padding(horizontal = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(Modifier.padding(top = 24.dp).size(72.dp).clip(CircleShape).background(content.copy(alpha = 0.08f)), Alignment.Center) {
+            Sym("visibility_off", content.copy(alpha = 0.8f), 34.dp)
+        }
+        Text(t("無痕瀏覽"), Modifier.padding(top = 16.dp), color = content, fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Text(
             t("關閉無痕分頁後，不會留下瀏覽紀錄、搜尋紀錄與 Cookie"),
-            Modifier.padding(top = 8.dp),
-            color = content.copy(alpha = 0.55f), fontSize = 15.sp, textAlign = TextAlign.Center, lineHeight = 21.sp,
+            Modifier.padding(top = 8.dp, start = 12.dp, end = 12.dp),
+            color = content.copy(alpha = 0.6f), fontSize = 15.sp, textAlign = TextAlign.Center, lineHeight = 21.sp,
         )
+        NoteCard(
+            t("Orea 不會保存"), content,
+            listOf("history" to t("瀏覽紀錄"), "cookie" to t("Cookie 與網站資料"), "edit" to t("在表單輸入的資料")),
+        )
+        NoteCard(
+            t("仍然看得到你的瀏覽活動"), content,
+            listOf("public" to t("你造訪的網站"), "work" to t("你的公司或學校"), "network_check" to t("你的網路服務供應商")),
+        )
+        NoteCard(
+            t("一律開啟的保護"), content,
+            listOf("shield" to t("阻擋已知追蹤器"), "cookie" to t("封鎖第三方 Cookie"), "link_off" to t("移除網址追蹤參數")),
+        )
+        Text(
+            t("下載的檔案和加入的書籤會保留"), Modifier.padding(top = 16.dp, bottom = 8.dp),
+            color = content.copy(alpha = 0.5f), fontSize = 13.sp, textAlign = TextAlign.Center,
+        )
+    }
+}
+
+/** 無痕說明的一張卡片：標題＋幾列圖示與文字 */
+@Composable
+private fun NoteCard(title: String, content: Color, rows: List<Pair<String, String>>) {
+    Column(Modifier.padding(top = 16.dp).fillMaxWidth().clip(RoundedCornerShape(Dimens.CardRadius)).background(content.copy(alpha = 0.06f)).padding(16.dp)) {
+        Text(title, color = content, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        rows.forEach { (icon, text) ->
+            Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Sym(icon, content.copy(alpha = 0.6f), 20.dp)
+                Text(text, Modifier.padding(start = 12.dp), color = content.copy(alpha = 0.8f), fontSize = 15.sp)
+            }
+        }
     }
 }
 

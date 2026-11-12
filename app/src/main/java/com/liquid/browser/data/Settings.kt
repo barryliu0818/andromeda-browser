@@ -62,6 +62,10 @@ data class Settings(
     val cleanLinksEverywhere: Boolean = false,
     /** Brave 式防追蹤：防指紋（canvas／音訊／CPU 核心數加入每個網站不同的雜訊）、跳過追蹤跳轉頁、HTTPS 升級、GPC 訊號 */
     val shields: Boolean = true,
+    /** 離開 App 時鎖定無痕分頁（Chrome「離開時鎖定無痕分頁」）：回來要用指紋或螢幕鎖解鎖 */
+    val lockIncognito: Boolean = false,
+    /** 允許在無痕分頁截圖（Brave／Chrome 預設不允許；不允許時最近使用的 App 畫面也不顯示內容） */
+    val incognitoScreenshots: Boolean = false,
     /** 常用網站：使用者加入或編輯過的（排在最前面，順序固定），每筆是 名稱 to 網址 */
     val favorites: List<Pair<String, String>> = emptyList(),
     /** 從常用網站刪掉的網域：就算之後常去也不再自動出現 */
@@ -98,6 +102,8 @@ class SettingsStore(private val context: Context) {
         val layout = stringPreferencesKey("bar_layout")
         val tpc = booleanPreferencesKey("block_third_party_cookies")
         val shields = booleanPreferencesKey("shields")
+        val lockIncognito = booleanPreferencesKey("lock_incognito")
+        val incognitoShots = booleanPreferencesKey("incognito_screenshots")
         val cleanAll = booleanPreferencesKey("clean_links_everywhere")
         val favs = stringPreferencesKey("favorites")
         val hiddenFavs = stringSetPreferencesKey("hidden_favorites")
@@ -130,6 +136,8 @@ class SettingsStore(private val context: Context) {
         blockThirdPartyCookies = this[K.tpc] ?: true,
         cleanLinksEverywhere = this[K.cleanAll] ?: false,
         shields = this[K.shields] ?: true,
+        lockIncognito = this[K.lockIncognito] ?: false,
+        incognitoScreenshots = this[K.incognitoShots] ?: false,
         favorites = this[K.favs]?.let { j -> runCatching { org.json.JSONArray(j).let { a -> List(a.length()) { i -> a.getJSONArray(i).let { it.getString(0) to it.getString(1) } } } }.getOrNull() }.orEmpty(),
         hiddenFavorites = this[K.hiddenFavs] ?: emptySet(),
         appLang = this[K.appLang]?.let { runCatching { com.liquid.browser.core.AppLang.valueOf(it) }.getOrNull() } ?: com.liquid.browser.core.AppLang.System,
@@ -157,6 +165,8 @@ class SettingsStore(private val context: Context) {
             p[K.tpc] = n.blockThirdPartyCookies
             p[K.cleanAll] = n.cleanLinksEverywhere
             p[K.shields] = n.shields
+            p[K.lockIncognito] = n.lockIncognito
+            p[K.incognitoShots] = n.incognitoScreenshots
             p[K.favs] = org.json.JSONArray(n.favorites.map { (t, u) -> org.json.JSONArray(listOf(t, u)) }).toString()
             p[K.hiddenFavs] = n.hiddenFavorites
             p[K.appLang] = n.appLang.name
