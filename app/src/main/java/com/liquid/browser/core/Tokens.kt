@@ -140,8 +140,8 @@ object Dimens {
     val CardRadius = 20.dp
     /** 選單、面板圓角：Material 3 Expressive extra-large（28dp） */
     val MenuRadius = 28.dp
-    val TileRadius = 16.dp
-    val Tile = 60.dp
+    val TileRadius = 12.dp
+    val Tile = 52.dp
 }
 
 /**

@@ -371,7 +371,7 @@ private fun AddTile(content: Color, modifier: Modifier, onClick: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(Modifier.size(Dimens.Tile).clip(RoundedCornerShape(Dimens.TileRadius)).background(content.copy(alpha = 0.08f)), Alignment.Center) {
-            Sym("add", content.copy(alpha = 0.6f), 28.dp)
+            Sym("add", content.copy(alpha = 0.6f), 24.dp)
         }
         // 跟網站名稱同樣的字級與行高（以前沒設行高，「加入」比其他名稱低一截）
         Text(t("加入"), Modifier.padding(top = 6.dp), color = content.copy(alpha = 0.6f), fontSize = 12.sp, maxLines = 1, lineHeight = 15.sp)
