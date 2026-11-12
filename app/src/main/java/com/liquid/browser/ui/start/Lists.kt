@@ -125,7 +125,7 @@ fun BookmarksPage(vm: BrowserViewModel, content: Color, tone: Tone, padding: Pad
                 }
             }
         }
-        if (local.isEmpty()) item(key = "empty") { EmptyState("bookmark", t("還沒有書籤"), t("開啟網頁後，從 ⋯ 選單點「加入書籤」"), tone) }
+        if (local.isEmpty()) item(key = "empty") { EmptyState("bookmark", t("還沒有書籤"), t("開啟網頁後，從 ☰ 選單點「加入書籤」"), tone) }
         else item(key = "gap") { Spacer(Modifier.size(8.dp)) }
         itemsIndexed(local, key = { _, b -> b.id }) { i, b ->
             Row(
@@ -169,7 +169,7 @@ fun ReadingListPage(vm: BrowserViewModel, menu: MenuState, content: Color, tone:
             PageTitle(t("閱讀列表"), tone, Modifier.padding(start = 4.dp))
             if (items.isNotEmpty()) GroupFooter(t("%1\$s 篇未讀・長按可標示已讀或刪除", items.count { !it.read }), Modifier.padding(bottom = 10.dp))
         }
-        if (items.isEmpty()) item(key = "empty") { EmptyState("eyeglasses", t("閱讀列表是空的"), t("從 ⋯ 選單或長按連結「加入閱讀列表」，之後慢慢看"), tone) }
+        if (items.isEmpty()) item(key = "empty") { EmptyState("eyeglasses", t("閱讀列表是空的"), t("從 ☰ 選單或長按連結「加入閱讀列表」，之後慢慢看"), tone) }
         itemsIndexed(items, key = { _, r -> r.url }) { i, r ->
             var bounds by remember { mutableStateOf(Rect.Zero) }
             Row(
@@ -253,7 +253,11 @@ fun HistoryPage(vm: BrowserViewModel, menu: MenuState, content: Color, tone: Ton
                                 listOf(
                                     MenuItem(t("在新分頁開啟"), "add_box") { vm.newTab(e.url) },
                                     MenuItem(t("在背景分頁開啟"), "tab") { vm.newTab(e.url, background = true) },
-                                    MenuItem(t("刪除"), "delete", destructive = true) { scope.launch { dao.delete(e.id) } },
+                                    MenuItem(t("刪除"), "delete", destructive = true) {
+                                        // 這一筆代表當天所有造訪：全部刪掉，不然較早的那次會補上來
+                                        val day = dayOf(e.visitedAt)
+                                        scope.launch { dao.deleteUrlBetween(e.url, day, day + 86_400_000L) }
+                                    },
                                 ),
                             ),
                         )
@@ -299,7 +303,8 @@ private fun groupByDay(items: List<HistoryEntry>): List<Pair<String, List<Histor
     val today = startOfDay(0)
     val yesterday = startOfDay(-1)
     val week = startOfDay(-6)
-    return items.groupBy {
+    // 同一天同一個網址只留最近一次（同 Chrome／Brave 的歷史紀錄頁）；items 已依時間由新到舊
+    return items.distinctBy { dayOf(it.visitedAt) to it.url }.groupBy {
         when {
             it.visitedAt >= today -> t("今天")
             it.visitedAt >= yesterday -> t("昨天")
@@ -313,9 +318,15 @@ private fun groupByDay(items: List<HistoryEntry>): List<Pair<String, List<Histor
 private fun TextAction(text: String, color: Color, onClick: () -> Unit) =
     Text(text, Modifier.clip(CircleShape).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp), color = color, fontSize = 16.sp)
 
-/** 歷史紀錄的時間：今天顯示「14:05」，其他日子顯示「10/19 14:05」 */
+/** 歷史紀錄的時間：今天、昨天的分組標題已經說了是哪天，只顯示「14:05」；更早的顯示「10/19 14:05」 */
 private fun timeLabel(at: Long): String =
-    java.text.SimpleDateFormat(if (at >= startOfDay(0)) "HH:mm" else "M/d HH:mm", java.util.Locale.getDefault()).format(java.util.Date(at))
+    java.text.SimpleDateFormat(if (at >= startOfDay(-1)) "HH:mm" else "M/d HH:mm", java.util.Locale.getDefault()).format(java.util.Date(at))
+
+/** 這個時間是哪一天（當天 0 點） */
+private fun dayOf(at: Long): Long = Calendar.getInstance().apply {
+    timeInMillis = at
+    set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+}.timeInMillis
 
 /** 空清單：大圖示＋標題＋一句說明（告訴使用者怎麼開始） */
 @Composable

@@ -133,6 +133,8 @@ class Tab(
         fun onPageStart(tab: Tab) {}
         /** 這個分頁有沒有正在發出聲音的影片／音樂改變了（音訊焦點用） */
         fun onAudible(tab: Tab) {}
+        /** 擋下了 n 個廣告或追蹤請求（起始頁的隱私統計累計用） */
+        fun onBlocked(n: Int) {}
         /** 網頁取消了還沒回覆的權限要求 */
         fun onSitePermissionCancel(tab: Tab)
         /** 網頁的 <input type=file>（含 capture 拍照）：回傳 true 表示會呼叫 callback */
@@ -486,7 +488,7 @@ class Tab(
                     val page = pageHost
                     if (blockPage && AdBlocker.blocksRequest(u, request.url.host.orEmpty(), page, AdBlocker.resourceType(request))) {
                         // 廣告多的頁面一秒擋幾十個：累計起來每 100ms 更新一次計數（以前每擋一個就丟一個工作給主執行緒）
-                        if (blockedPending.getAndIncrement() == 0) main.postDelayed({ blockedCount += blockedPending.getAndSet(0) }, 100)
+                        if (blockedPending.getAndIncrement() == 0) main.postDelayed({ val n = blockedPending.getAndSet(0); blockedCount += n; listener.onBlocked(n) }, 100)
                         return AdBlocker.emptyResponse()
                     }
                 }

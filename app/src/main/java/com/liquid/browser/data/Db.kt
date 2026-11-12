@@ -40,6 +40,9 @@ data class HistoryEntry(
     val visitedAt: Long,
 )
 
+/** 經常瀏覽的網站（[HistoryDao.frequent] 的結果） */
+data class FrequentHost(val host: String, val url: String, val title: String, val visits: Int, val lastVisit: Long)
+
 @Immutable
 @Entity(tableName = "reading_list")
 data class ReadingItem(
@@ -109,6 +112,17 @@ interface HistoryDao {
 
     @Query("DELETE FROM history WHERE id = :id")
     suspend fun delete(id: Long)
+
+    /**
+     * 經常瀏覽的網站（起始頁）：近期造訪次數最多的網域，至少來過 2 次；
+     * MAX(visitedAt) 讓 url、title 取自該網域最近一次造訪那筆
+     */
+    @Query("SELECT host, url, title, COUNT(*) AS visits, MAX(visitedAt) AS lastVisit FROM history WHERE visitedAt >= :since GROUP BY host HAVING visits >= 2 ORDER BY visits DESC, lastVisit DESC LIMIT :limit")
+    fun frequent(since: Long, limit: Int): Flow<List<FrequentHost>>
+
+    /** 刪掉某個網址在一段時間內的所有造訪（歷史紀錄頁同一天同一個網址只列一筆，刪除要把那天的都刪掉） */
+    @Query("DELETE FROM history WHERE url = :url AND visitedAt >= :from AND visitedAt < :to")
+    suspend fun deleteUrlBetween(url: String, from: Long, to: Long)
 
     @Query("DELETE FROM history WHERE visitedAt >= :since")
     suspend fun deleteSince(since: Long)

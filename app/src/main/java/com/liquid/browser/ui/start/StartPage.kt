@@ -200,7 +200,8 @@ private fun GlassSegments(pager: PagerState, haze: dev.chrisbanes.haze.HazeState
                         val frac = pos - floor(pos)
                         scaleX = 1f + 0.18f * sin(PI * frac).toFloat()
                     }
-                    .clip(CircleShape).background(if (darkSeg) Color(0xFF48484A) else Color.White),
+                    // 淺色時玻璃本身接近白色：選中的底塊用淡灰（白色疊在白玻璃上看不出選了哪段）
+                    .clip(CircleShape).background(if (darkSeg) Color(0xFF48484A) else Color.Black.copy(alpha = 0.09f)),
             )
             Row(Modifier.fillMaxSize()) {
                 Sections.forEachIndexed { i, (icon, label) ->
@@ -259,9 +260,12 @@ private fun FavoritesPage(
         }
     }
     val showAll = { page: Int -> scope.launch { pager.animateScrollToPage(page, animationSpec = Motion.glass()) }; Unit }
+    val frequent by remember(sites) { vm.frequentSites(sites) }.collectAsState(emptyList())
+    val blocked by vm.blockedTotal.collectAsState()
     LazyColumn(Modifier.fillMaxSize(), contentPadding = padding) {
         item(key = "fav") {
-            SectionHeader(t("常用網站"), content, null)
+            // 跟書籤、閱讀列表、歷史紀錄頁同樣的大標題：左右滑動切換時標題不會一下大一下小
+            com.liquid.browser.ui.PageTitle(t("常用網站"), tone, Modifier.padding(start = 4.dp, bottom = 8.dp))
             FavoritesGrid(
                 sites, icons, content, onPick = onOpen,
                 // 長按：在新分頁開啟／編輯／刪除
@@ -280,6 +284,11 @@ private fun FavoritesPage(
                 onAdd = { editing = Triple(null, "", "") },
             )
         }
+        // 經常瀏覽的網站（Safari 起始頁）：近 30 天常去、還沒加進常用網站的
+        if (frequent.isNotEmpty()) item(key = "freq") {
+            SectionHeader(t("經常瀏覽的網站"), content, null, top = 28.dp)
+            TopSites(frequent, icons, content, Modifier.animateItem(), onPick = onOpen)
+        }
         if (reading.isNotEmpty()) {
             item(key = "rl") { SectionHeader(t("閱讀列表"), content, { showAll(2) }, top = 28.dp) }
             itemsIndexed(reading.take(3), key = { _, r -> "r${r.url}" }) { i, r ->
@@ -288,6 +297,11 @@ private fun FavoritesPage(
                     onOpen(r.url)
                 }
             }
+        }
+        // 隱私權報告（Safari 起始頁；數字照 Brave 新分頁：累計擋下的廣告與追蹤器、估計省下的時間）
+        if (blocked > 0) item(key = "privacy") {
+            SectionHeader(t("隱私權報告"), content, null, top = 28.dp)
+            PrivacyCard(blocked, content, tone, haze, Modifier.animateItem())
         }
     }
 }
@@ -357,7 +371,8 @@ private fun AddTile(content: Color, modifier: Modifier, onClick: () -> Unit) {
         Box(Modifier.size(Dimens.Tile).clip(RoundedCornerShape(Dimens.TileRadius)).background(content.copy(alpha = 0.08f)), Alignment.Center) {
             Sym("add", content.copy(alpha = 0.6f), 28.dp)
         }
-        Text(t("加入"), Modifier.padding(top = 6.dp), color = content.copy(alpha = 0.6f), fontSize = 12.sp, maxLines = 1)
+        // 跟網站名稱同樣的字級與行高（以前沒設行高，「加入」比其他名稱低一截）
+        Text(t("加入"), Modifier.padding(top = 6.dp), color = content.copy(alpha = 0.6f), fontSize = 12.sp, maxLines = 1, lineHeight = 15.sp)
     }
 }
 
@@ -458,6 +473,39 @@ private fun ReadingCard(r: ReadingItem, content: Color, tone: Tone, haze: dev.ch
     }
 }
 
+/**
+ * 隱私權報告卡片：盾牌＋累計擋下的數量＋估計省下的時間。
+ * 省下的時間照 Brave（brave_stats 每擋一個算 50ms）
+ */
+@Composable
+private fun PrivacyCard(blocked: Long, content: Color, tone: Tone, haze: dev.chrisbanes.haze.HazeState, modifier: Modifier) {
+    val seconds = blocked * 50 / 1000
+    val saved = when {
+        seconds < 60 -> t("%1\$s 秒", seconds)
+        seconds < 3600 -> t("%1\$s 分鐘", seconds / 60)
+        else -> t("%1\$s 小時", String.format(java.util.Locale.getDefault(), "%.1f", seconds / 3600f))
+    }
+    LiquidGlass(
+        haze, tone, RoundedCornerShape(Dimens.CardRadius), modifier.fillMaxWidth(),
+        systemBlur = false, contentAlignment = Alignment.CenterStart,
+    ) {
+        // 高度隨文字：說明在英文等較長的語言會換成兩行，不截斷
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(48.dp).clip(CircleShape).background(Color(0xFF34C759).copy(alpha = 0.16f)), Alignment.Center) {
+                Sym("shield", Color(0xFF34C759), 26.dp)
+            }
+            Column(Modifier.padding(start = 14.dp).weight(1f)) {
+                Text(java.text.NumberFormat.getInstance().format(blocked), color = content, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                Text(t("個廣告與追蹤器已被 Orea 擋下"), color = content.copy(alpha = 0.7f), fontSize = 13.sp, lineHeight = 17.sp)
+            }
+            Column(Modifier.padding(start = 12.dp), horizontalAlignment = Alignment.End) {
+                Text(saved, color = content, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                Text(t("省下的時間"), color = content.copy(alpha = 0.7f), fontSize = 13.sp)
+            }
+        }
+    }
+}
+
 /** 新分頁（Safari 起始頁）：起始頁鋪上搜尋引擎色場或自訂背景圖；搜尋、輸入網址由網址列負責 */
 @Composable
 fun HomePage(vm: BrowserViewModel, menu: MenuState, modifier: Modifier, barTop: Dp, barBottom: Dp, onOpen: (String) -> Unit) =
@@ -526,9 +574,10 @@ private fun SiteTile(site: Visit, icons: Map<String, String>, content: Color, mo
     val host = Uri.parse(site.url).host?.removePrefix("www.").orEmpty()
     Column(modifier.clickable(onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally) {
         SiteIcon(host, icons, Dimens.Tile, Dimens.TileRadius)
+        // 跟常用網站格子一樣：兩行、置中、同樣的行高
         Text(
-            site.title.ifBlank { host }, Modifier.padding(top = 6.dp).widthIn(max = 72.dp),
-            color = content, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            site.title.ifBlank { host }, Modifier.padding(top = 6.dp).widthIn(max = 76.dp),
+            color = content, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, lineHeight = 15.sp,
         )
     }
 }
@@ -537,7 +586,8 @@ private fun SiteTile(site: Visit, icons: Map<String, String>, content: Color, mo
 @Composable
 fun SiteIcon(host: String, icons: Map<String, String>, size: Dp, radius: Dp) {
     val shape = RoundedCornerShape(radius)
-    val url = icons[host]
+    // 子網域沒有自己的圖示時用主網域的（m.youtube.com 用 youtube.com 的）
+    val url = icons[host] ?: icons[com.liquid.browser.browser.baseDomain(host)]
     val painter = rememberAsyncImagePainter(url)
     val state by painter.state.collectAsState()
     // Coil 需要先繪製一次才知道尺寸並開始載入，所以圖片永遠繪製，成功前以首字母方塊蓋住

@@ -392,8 +392,8 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
 
     /** 網域 → 高解析度圖示網址 */
     val icons: StateFlow<Map<String, String>> = db.icons().all()
-        .map { list -> list.associate { it.host to it.iconUrl } }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+        .map { list -> list.associate { it.host to it.iconUrl } + BUNDLED_ICONS }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, BUNDLED_ICONS)
 
     init {
         SitePermissionStore.init(app)
@@ -472,6 +472,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         tabs.add(at, tab)
         if (!background || current == null) select(tab)
         if (!incognito) ExtensionHost.tabCreated(tab)
+        scheduleSave()
         if (!url.isNullOrBlank()) tab.load(url)
         return tab
     }
@@ -487,6 +488,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         tab.setForeground(true)
         current = tab
         ExtensionHost.tabActivated(tab)
+        scheduleSave()
         incognitoMode = tab.incognito
         collapse = 0f
         collapsed = false
@@ -539,6 +541,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     }
 
     fun close(tab: Tab) {
+        scheduleSave()
         ExtensionHost.tabRemoved(tab)
         val siblings = tabs.filter { it.incognito == tab.incognito }
         val i = siblings.indexOf(tab)
@@ -571,7 +574,18 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     private val sessionFile = java.io.File(app.filesDir, "session.json")
 
     /** 記下一般分頁（不含無痕與起始頁）與目前分頁，App 被系統結束後重開可以還原 */
-    fun saveSession() {
+    /**
+     * 分頁有變動（開、關、換頁）後 1.5 秒存一次：以前只在 App 退到背景時存，前景閃退、被系統結束或更新安裝時，
+     * 上次退到背景之後開的分頁全部不見。這裡不存縮圖（壓縮所有縮圖太重），縮圖仍在退到背景時存
+     */
+    fun scheduleSave() {
+        saveJob?.cancel()
+        saveJob = viewModelScope.launch { delay(1500); saveSession(thumbnails = false) }
+    }
+    private var saveJob: kotlinx.coroutines.Job? = null
+
+    fun saveSession(thumbnails: Boolean = true) {
+        if (thumbnails) saveJob?.cancel()
         val list = tabs.filter { !it.incognito && !it.isBlank }
         val json = org.json.JSONObject()
             .put("current", list.indexOf(current))
@@ -583,14 +597,16 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         // 寫到一半被系統結束也不會留下壞掉的 session.json
         val text = json.toString()
         // 總覽卡片的縮圖也存起來（JPEG，背景執行緒壓縮），還原後卡片不會一片空白
-        val thumbs = list.map { it.thumbnail?.asAndroidBitmap() }
+        val thumbs = if (thumbnails) list.map { it.thumbnail?.asAndroidBitmap() } else null
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
                 val tmp = java.io.File(sessionFile.path + ".tmp")
                 tmp.writeText(text)
                 if (!tmp.renameTo(sessionFile)) { sessionFile.delete(); tmp.renameTo(sessionFile) }
             }
+            // 沒有重存縮圖時舊縮圖的順序可能已經對不上：刪掉（還原後卡片空白，總比顯示錯的網頁好）
             thumbDir.deleteRecursively()
+            if (thumbs == null) return@launch
             thumbDir.mkdirs()
             thumbs.forEachIndexed { i, b ->
                 b?.let { bmp -> runCatching { java.io.File(thumbDir, "$i.jpg").outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, it) } } }
@@ -717,6 +733,31 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         if (tab.incognito || !url.startsWith("http")) return
         val host = Uri.parse(url).host?.removePrefix("www.") ?: return
         viewModelScope.launch { db.history().insert(HistoryEntry(url = url, host = host, title = title, visitedAt = System.currentTimeMillis())) }
+        scheduleSave()
+    }
+
+    // ── 起始頁的隱私統計（照 Brave 新分頁：累計擋下的廣告與追蹤器、估計省下的時間） ──
+    private val statsPrefs = app.getSharedPreferences("stats", android.content.Context.MODE_PRIVATE)
+    val blockedTotal = kotlinx.coroutines.flow.MutableStateFlow(statsPrefs.getLong("blocked", 0L))
+
+    override fun onBlocked(n: Int) {
+        blockedTotal.value += n
+        statsPrefs.edit().putLong("blocked", blockedTotal.value).apply()
+    }
+
+    /**
+     * 經常瀏覽的網站（起始頁，Safari 的「經常瀏覽」）：近 30 天最常去的網域，已在常用網站裡的不重複列出。
+     * 連到網站首頁（scheme＋網域），名稱用主網域（en.wikipedia.org → wikipedia.org）；
+     * 比對、去重也用主網域：m.youtube.com 跟常用網站的 YouTube 是同一個網站
+     */
+    fun frequentSites(favorites: List<Visit>): kotlinx.coroutines.flow.Flow<List<Visit>> {
+        val favSites = favorites.map { baseDomain(favHost(it.url)) }.toSet()
+        return db.history().frequent(System.currentTimeMillis() - 30L * 86_400_000L, 24).map { list ->
+            list.filter { baseDomain(it.host) !in favSites }.distinctBy { baseDomain(it.host) }.take(8).map { f ->
+                val u = Uri.parse(f.url)
+                Visit("${u.scheme}://${u.authority}/", baseDomain(f.host))
+            }
+        }
     }
 
     override fun onIcon(host: String, iconUrl: String) {
@@ -1352,6 +1393,13 @@ private val DEFAULT_SITES = listOf(
     Visit("https://www.bbc.com", "BBC"),
     Visit("https://maps.google.com", "Maps"),
 )
+
+/**
+ * 預設常用網站的圖示（assets/favicons）：圖示原本要等使用者開過那個網站才抓得到，新裝的 App 只看到一排字母；
+ * 這些網站大多在中國打不開，也沒辦法事先抓，所以內建
+ */
+private val BUNDLED_ICONS = listOf("google.com", "youtube.com", "wikipedia.org", "github.com", "reddit.com", "news.ycombinator.com", "bbc.com", "maps.google.com")
+    .associateWith { "file:///android_asset/favicons/$it.png" }
 
 /** 同時保留 WebView 的分頁數上限（每個約 20～80MB），超過的背景分頁釋放 */
 private const val MAX_LIVE_TABS = 6

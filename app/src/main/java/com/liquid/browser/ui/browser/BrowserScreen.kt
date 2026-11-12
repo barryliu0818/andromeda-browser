@@ -188,6 +188,9 @@ fun BrowserScreen(vm: BrowserViewModel) {
     var pageTop by remember { mutableStateOf<Color?>(null) }
     LaunchedEffect(tab, tab.url) { pageTop = null }
     val statusPx = WindowInsets.statusBars.getTop(LocalDensity.current).toFloat()
+    // 取樣迴圈在第一次組合時就啟動，那時系統還沒給狀態列高度（0）：迴圈裡要讀最新的值，
+    // 不然一直取樣到狀態列自己的底色（永遠是白色，網頁變暗了狀態列也不跟著變）
+    val statusPxNow by androidx.compose.runtime.rememberUpdatedState(statusPx)
     val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
     // 只在 App 顯示於前景時取樣：背景時視窗沒有畫面，取樣沒有意義又耗電
     LaunchedEffect(landscape) {
@@ -197,7 +200,8 @@ fun BrowserScreen(vm: BrowserViewModel) {
             val w = activity?.window?.decorView?.width ?: break
             // 狀態列與網頁融為一體：取樣狀態列正下方那一條網頁的實際顏色（面板、選單、輸入時不取樣，免得取到遮罩）
             if (!tab.isBlank && !overview && !focused && !sheet.open && !menu.open) {
-                val top = statusPx.toInt()
+                val top = statusPxNow.toInt()
+                if (top <= 0) continue
                 sampleDominantColor(activity, android.graphics.Rect(0, top + 2, w, top + 6))?.let { pageTop = it }
             }
         }
