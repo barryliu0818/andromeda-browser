@@ -16,7 +16,8 @@
     sideZone: 0.35,
     scrubThreshold: 16,    // CSS px（約等於 16dp）
     verticalThreshold: 16,
-    screenWidthSec: 90,
+    // 左右拖動：拖滿整個寬度跳片長的 1/12，至少 5 分鐘、最多 10 分鐘（同 VideoGestures.kt 的 GestureSpec.screenWidthMs）
+    screenWidthMin: 300, screenWidthMax: 600,
     boost: 2.0
   };
 
@@ -469,7 +470,9 @@
       if (down.mode === 'wait') return;
       if (down.mode === 'scrub') {
         var dur = video.duration || 0;
-        var secPerPx = Math.min(SPEC.screenWidthSec, dur || SPEC.screenWidthSec) / layer.clientWidth;
+        var span = Math.min(Math.max((dur || 0) / 12, SPEC.screenWidthMin), SPEC.screenWidthMax);
+        if (dur) span = Math.min(span, dur);
+        var secPerPx = span / layer.clientWidth;
         down.target = Math.max(0, Math.min(dur || 1e9, down.start + dx * secPerPx));
         var delta = Math.round(down.target - down.start);
         scrub.innerHTML = H(fmt(down.target) + ' / ' + fmt(dur) + '<small>' + (delta >= 0 ? '+' : '−') + Math.abs(delta) + ' 秒</small>');

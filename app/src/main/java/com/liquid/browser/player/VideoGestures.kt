@@ -38,7 +38,11 @@ object GestureSpec {
     const val SideZone = 0.35f
     val ScrubThreshold = 16.dp
     val VerticalThreshold = 16.dp
-    const val ScreenWidthMs = 90_000L
+    /**
+     * 左右拖動進度：拖滿整個螢幕寬度跳多少。以前固定 90 秒，長片（兩三小時）要拖好多次；
+     * 改成依片長：片長的 1/12，至少 5 分鐘、最多 10 分鐘（短於這個的片子拖滿就是整部）
+     */
+    fun screenWidthMs(durationMs: Long): Long = (durationMs / 12).coerceIn(300_000L, 600_000L).coerceAtMost(durationMs.coerceAtLeast(1))
     const val BoostSpeed = 2.0f
 }
 
@@ -178,7 +182,7 @@ fun Modifier.videoGestures(state: VideoGestureState, actions: VideoGestureAction
                         // 水平拖動進度：放開才跳轉
                         val start = actions.position()
                         val dur = actions.duration().coerceAtLeast(1)
-                        val msPerPx = min(GestureSpec.ScreenWidthMs, dur).toFloat() / size.width
+                        val msPerPx = GestureSpec.screenWidthMs(dur).toFloat() / size.width
                         var target = start
                         while (true) {
                             val c = awaitPointerEvent().changes.first()
