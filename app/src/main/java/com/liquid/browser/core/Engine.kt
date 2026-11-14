@@ -32,6 +32,9 @@ object Engine {
     var active: String = ""
         private set
 
+    /** 正在用內建的 Orea Chromium 核心：它跟 Chrome 一樣自己處理音訊焦點（App 不要再要一次，見 BrowserViewModel.onAudible） */
+    val handlesAudioFocus: Boolean get() = active.startsWith("Orea Chromium")
+
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("engine", Context.MODE_PRIVATE)
 
     /** 使用者是否選用 Orea 核心（預設：有就用） */

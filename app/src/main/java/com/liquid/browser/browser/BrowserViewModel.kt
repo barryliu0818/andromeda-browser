@@ -1178,12 +1178,14 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
 
     private val noisyReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(c: android.content.Context, i: Intent) {
+            com.liquid.browser.BugLog.event("audio", "becoming noisy")
             pausedForFocus = emptyList()
             tabs.filter { it.audible }.forEach { it.pauseMedia(resume = false) }
         }
     }
 
     private val focusListener = android.media.AudioManager.OnAudioFocusChangeListener { change ->
+        com.liquid.browser.BugLog.event("audio", "focus change=$change audible=${tabs.filter { it.audible }.joinToString { Uri.parse(it.url).host.orEmpty() }}")
         when (change) {
             android.media.AudioManager.AUDIOFOCUS_LOSS -> {
                 pausedForFocus = emptyList()
@@ -1202,8 +1204,28 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         }
     }
 
+    /** 拔耳機時暫停用的廣播是否已註冊（內建核心自己管音訊焦點時，只註冊這個） */
+    private var noisyRegistered = false
+
+    private fun setNoisy(on: Boolean) {
+        if (on == noisyRegistered) return
+        noisyRegistered = on
+        if (on) androidx.core.content.ContextCompat.registerReceiver(
+            getApplication(), noisyReceiver,
+            android.content.IntentFilter(android.media.AudioManager.ACTION_AUDIO_BECOMING_NOISY),
+            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED,
+        ) else runCatching { getApplication<Application>().unregisterReceiver(noisyReceiver) }
+    }
+
     override fun onAudible(tab: Tab) {
         val any = tabs.any { it.audible }
+        // 內建的 Orea Chromium 核心跟 Chrome 一樣自己向系統要音訊焦點（AudioFocusDelegate）：
+        // App 再要一次會把焦點從核心手上搶走、核心暫停影片，核心再搶回來、App 又收到失去焦點而暫停——影片一播就停。
+        // 這時 App 不要焦點，只負責拔耳機時暫停
+        if (com.liquid.browser.core.Engine.handlesAudioFocus) {
+            setNoisy(any)
+            return
+        }
         when {
             any && focusRequest == null -> {
                 val req = android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN)
@@ -1218,13 +1240,10 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
                     .build()
                 if (audioManager.requestAudioFocus(req) == android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
                     focusRequest = req
-                    androidx.core.content.ContextCompat.registerReceiver(
-                        getApplication(), noisyReceiver,
-                        android.content.IntentFilter(android.media.AudioManager.ACTION_AUDIO_BECOMING_NOISY),
-                        androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED,
-                    )
+                    setNoisy(true)
                 } else {
                     // 要不到（通話中）：跟 Chrome 一樣不讓網頁出聲
+                    com.liquid.browser.BugLog.event("audio", "focus request denied")
                     tabs.filter { it.audible }.forEach { it.pauseMedia(resume = false) }
                 }
             }
@@ -1237,7 +1256,7 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
         val req = focusRequest ?: return
         focusRequest = null
         audioManager.abandonAudioFocusRequest(req)
-        runCatching { getApplication<Application>().unregisterReceiver(noisyReceiver) }
+        setNoisy(false)
     }
 
     /**
