@@ -80,7 +80,7 @@
     'font:600 13px system-ui,sans-serif;background:rgba(255,255,255,.16);box-shadow:inset 0 1px 0 rgba(255,255,255,.25);transition:transform .15s}' +
     '.lq-speed:active{transform:scale(.92)}' +
     // 右下角下載鈕與二次確認卡片
-    '.lq-dl{margin-left:auto}' +
+    '.lq-rot{margin-left:auto}' +
     '.lq-confirm{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.35);opacity:0;pointer-events:none;transition:opacity .16s}' +
     '.lq-confirm.open{opacity:1;pointer-events:auto}' +
     '.lq-card{width:min(300px,78%);padding:20px 18px 14px;border-radius:24px;text-align:center;color:#fff;background:rgba(28,28,30,.6);' +
@@ -141,6 +141,17 @@
     if (video.__lqSeen) return;
     video.__lqSeen = true;
     videos.push(video);
+    // 卡住診斷：播放中等資料（waiting）超過 3 秒，回報 App 記進錯誤紀錄（網域、位置、前面已緩衝多少）
+    var waitAt = 0;
+    video.addEventListener('waiting', function () { if (!video.paused) waitAt = Date.now(); });
+    video.addEventListener('playing', function () {
+      if (!waitAt) return;
+      var ms = Date.now() - waitAt; waitAt = 0;
+      if (ms < 3000) return;
+      var ahead = 0, b = video.buffered;
+      for (var i = 0; i < b.length; i++) if (b.start(i) <= video.currentTime && b.end(i) >= video.currentTime) ahead = b.end(i) - video.currentTime;
+      try { LiquidBridge.postMessage(JSON.stringify({ type: 'stall', ms: ms, at: Math.round(video.currentTime), ahead: Math.round(ahead), src: (video.currentSrc || '').slice(0, 5) })); } catch (e) {}
+    });
   }
   function onFullscreen() {
     var f = document.fullscreenElement || document.webkitFullscreenElement;
@@ -177,7 +188,9 @@
     var ICON_PAUSE = '<svg viewBox="0 0 24 24"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg>';
     var ICON_CLOSE = '<svg viewBox="0 0 24 24"><path d="M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12 19 17.6 17.6 19 12 13.4 6.4 19 5 17.6 10.6 12 5 6.4z"/></svg>';
     var SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4, 5];
-    var ICON_DL = '<svg viewBox="0 0 24 24"><path d="M11 4h2v8.2l3.1-3.1 1.4 1.4L12 16l-5.5-5.5 1.4-1.4 3.1 3.1zM5 18h14v2H5z"/></svg>';
+    // 轉向（直向↔橫向）：手機鎖定方向時也能把全螢幕影片轉成橫向
+    var ICON_ROT = '<svg viewBox="0 0 24 24"><path d="M16.48 2.52c3.27 1.55 5.61 4.72 5.97 8.48h1.5C23.44 4.84 18.29 0 12 0l-.66.03 3.81 3.81 1.33-1.32zm-6.25-.77c-.59-.59-1.54-.59-2.12 0L1.75 8.11c-.59.59-.59 1.54 0 2.12l12.02 12.02c.59.59 1.54.59 2.12 0l6.36-6.36c.59-.59.59-1.54 0-2.12L10.23 1.75zm4.6 19.44L2.81 9.17l6.36-6.36 12.02 12.02-6.36 6.36zm-7.31.29C4.25 19.94 1.91 16.76 1.55 13H.05C.56 19.16 5.71 24 12 24l.66-.03-3.81-3.81-1.33 1.32z"/></svg>';
+    var ICON_DL ='<svg viewBox="0 0 24 24"><path d="M11 4h2v8.2l3.1-3.1 1.4 1.4L12 16l-5.5-5.5 1.4-1.4 3.1 3.1zM5 18h14v2H5z"/></svg>';
     // 依網頁語言顯示確認文字（App 介面語言傳不進網頁，用瀏覽器語言判斷）
     var lang = (navigator.language || '').toLowerCase();
     var T = lang.indexOf('zh') === 0
@@ -195,7 +208,7 @@
       SPEEDS.map(function (r) { return '<div class="lq-opt" data-r="' + r + '">' + r + 'x' + ICON_CHECK + '</div>'; }).join('') + '</div></div></div>' +
       '<div class="lq-round lq-hit lq-center">' + ICON_PLAY + '</div>' +
       '<div class="lq-bottom"><div class="lq-track lq-hit"><i><u></u><b></b></i></div>' +
-      '<div class="lq-row"><div class="lq-btn lq-hit lq-pp"></div><div class="lq-time"></div><div class="lq-btn lq-hit lq-dl">' + ICON_DL + '</div></div></div>' +
+      '<div class="lq-row"><div class="lq-btn lq-hit lq-pp"></div><div class="lq-time"></div><div class="lq-btn lq-hit lq-rot">' + ICON_ROT + '</div><div class="lq-btn lq-hit lq-dl">' + ICON_DL + '</div></div></div>' +
       '<div class="lq-confirm"><div class="lq-card"><h4>' + T.title + '</h4><p>' + T.body + '</p>' +
       '<div class="lq-acts"><div class="no">' + T.no + '</div><div class="yes">' + T.yes + '</div></div></div></div>');
     layer.append(rippleL, rippleR, pill, scrub, ui);
@@ -244,6 +257,7 @@
     var confirmBox = $('.lq-confirm');
     function bridge(m) { try { if (window.LiquidBridge) LiquidBridge.postMessage(JSON.stringify(m)); } catch (e) {} }
     $('.lq-dl').addEventListener('pointerup', function (e) { e.stopPropagation(); confirmBox.classList.add('open'); clearTimeout(barTimer); });
+    $('.lq-rot').addEventListener('pointerup', function (e) { e.stopPropagation(); bridge({ type: 'rotate' }); keepBar(); });
     confirmBox.querySelector('.no').addEventListener('pointerup', function (e) { e.stopPropagation(); confirmBox.classList.remove('open'); keepBar(); });
     confirmBox.addEventListener('pointerup', function (e) { if (e.target === confirmBox) { confirmBox.classList.remove('open'); keepBar(); } });
     confirmBox.querySelector('.yes').addEventListener('pointerup', function (e) {
@@ -344,7 +358,7 @@
     // 第一次全螢幕時才建立：當下這次 fullscreenchange 已經在派送，上面新加的監聽收不到，由 onFullscreen 呼叫這裡補做
     video.__lqShow = function () { setTimeout(place, 50); setTimeout(showBar, 80); };
 
-    var pendingTap = null, lastTapAt = 0, lastZone = 0, accumulating = false, accumulated = 0, rippleTimer = null;
+    var pendingTap = null, lastTapAt = 0, lastZone = 0, lastSeekZone = 0, accumulating = false, accumulated = 0, rippleTimer = null;
     var prevRate = 1;
 
     function zoneOf(x) {
@@ -399,21 +413,23 @@
       // 倍速選單開著：點選單外的地方只關選單（這一下不算單擊／雙擊）
       if (rate.classList.contains('open')) { rate.classList.remove('open'); keepBar(); lastTapAt = 0; return true; }
       var zone = zoneOf(x), handled = false;
-      if (accumulating && zone !== 0 && zone === lastZone && at - lastTapAt < SPEC.accumulateMs) {
-        showSeek(zone, x, layer.clientHeight / 2); handled = true;
-      } else if (at - lastTapAt < SPEC.doubleTapMs && zone === lastZone) {
+      // 每次快轉都要雙擊（以前雙擊後同側單擊也會一直跳）；連續雙擊時提示裡的秒數累加
+      if (at - lastTapAt < SPEC.doubleTapMs && zone === lastZone) {
         if (zone === 0) { video.paused ? video.play() : video.pause(); }
-        else { accumulating = true; accumulated = 0; showSeek(zone, x, layer.clientHeight / 2); }
+        else {
+          if (!accumulating || zone !== lastSeekZone) accumulated = 0;
+          accumulating = true; lastSeekZone = zone;
+          showSeek(zone, x, layer.clientHeight / 2);
+        }
         handled = true;
       } else {
-        accumulating = false;
         // 單擊：等一下確定不是雙擊，再叫出／收起控制列
         clearTimeout(pendingTap);
         if (!barOn()) showBar();
         else pendingTap = setTimeout(function () { pendingTap = null; hideBar(); }, SPEC.doubleTapMs);
       }
       if (handled) { clearTimeout(pendingTap); pendingTap = null; }
-      lastTapAt = zone === 0 && handled ? 0 : at; lastZone = zone; // 中間雙擊後重新計算，第三下不算
+      lastTapAt = handled ? 0 : at; lastZone = zone; // 雙擊用掉的兩下不再跟下一下湊成雙擊
       return handled;
     }
 

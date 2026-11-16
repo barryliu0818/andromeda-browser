@@ -19,7 +19,6 @@ import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.liquid.browser.data.PlaybackDao
@@ -78,6 +77,8 @@ class PlayerController(
         private set
 
     private val saver: Job
+    /** 開始緩衝的時間（0＝沒在緩衝）：卡住多久記進錯誤紀錄 */
+    private var bufferingSince = 0L
 
     init {
         val headers = buildMap {
@@ -88,12 +89,30 @@ class PlayerController(
             }
             request.cookies?.let { put("Cookie", it) }
         }
-        val http = DefaultHttpDataSource.Factory()
+        // 網路：用 App 共用的 OkHttp（連線重用、HTTP/2、讀取逾時較長），以前的 HttpURLConnection 在代理或慢的 CDN 上
+        // 一段載入失敗就卡在緩衝
+        val http = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(
+            com.liquid.browser.core.Http.client.newBuilder()
+                .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                .build(),
+        )
             .setUserAgent(request.userAgent)
-            .setAllowCrossProtocolRedirects(true)
             .setDefaultRequestProperties(headers)
+        // 緩衝：預設以大小為上限（約 13MB），高畫質串流只夠十幾秒，網路一頓就卡住；
+        // 改成以時間為準，至少預先載入 30 秒、最多 3 分鐘，開播 1.5 秒、卡住後等 4 秒再繼續（不會一頓一頓）
+        val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+            .setBufferDurationsMs(30_000, 180_000, 1_500, 4_000)
+            .setTargetBufferBytes(128 * 1024 * 1024)
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .build()
+        // 載入失敗多重試幾次（預設 3 次）：一個片段暫時抓不到就不會整個卡住
+        val retries = androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy(8)
         player = ExoPlayer.Builder(context, androidx.media3.exoplayer.DefaultRenderersFactory(context).setEnableDecoderFallback(true))
-            .setMediaSourceFactory(DefaultMediaSourceFactory(context).setDataSourceFactory(DefaultDataSource.Factory(context, http)))
+            .setMediaSourceFactory(
+                DefaultMediaSourceFactory(context).setDataSourceFactory(DefaultDataSource.Factory(context, http)).setLoadErrorHandlingPolicy(retries),
+            )
+            .setLoadControl(loadControl)
             .setVideoChangeFrameRateStrategy(C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_ONLY_IF_SEAMLESS)
             // 音訊焦點：來電、其他 App 開始播放聲音時自動暫停；拔掉耳機、藍牙斷線時暫停，不會突然從喇叭放出來
             .setAudioAttributes(androidx.media3.common.AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true)
@@ -111,11 +130,23 @@ class PlayerController(
             override fun onPlaybackStateChanged(state: Int) {
                 if (player.duration > 0) durationMs = player.duration
                 ended = state == Player.STATE_ENDED
+                // 卡住診斷：緩衝超過 3 秒的記進錯誤紀錄（網域、位置、已緩衝多少）
+                if (state == Player.STATE_BUFFERING) bufferingSince = android.os.SystemClock.uptimeMillis()
+                else if (bufferingSince > 0) {
+                    val waited = android.os.SystemClock.uptimeMillis() - bufferingSince
+                    bufferingSince = 0
+                    if (waited > 3_000) com.liquid.browser.BugLog.event(
+                        "player", "緩衝 ${waited}ms ${android.net.Uri.parse(request.url).host} 位置 ${player.currentPosition / 1000}s 已緩衝 ${(player.bufferedPosition - player.currentPosition) / 1000}s",
+                    )
+                }
             }
             override fun onVideoSizeChanged(size: VideoSize) {
                 if (size.width > 0 && size.height > 0) videoAspect = size.width * size.pixelWidthHeightRatio / size.height
             }
-            override fun onPlayerError(e: androidx.media3.common.PlaybackException) { error = describe(e) }
+            override fun onPlayerError(e: androidx.media3.common.PlaybackException) {
+                error = describe(e)
+                com.liquid.browser.BugLog.event("player", "錯誤 ${e.errorCodeName} ${e.cause?.message?.take(120)} ${android.net.Uri.parse(request.url).host}")
+            }
         })
         player.prepare()
         player.playWhenReady = true

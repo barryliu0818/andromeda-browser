@@ -95,6 +95,7 @@ fun Modifier.videoGestures(state: VideoGestureState, actions: VideoGestureAction
     var lastTapZone = 0
     var accumulating = false
     var accumulated = 0
+    var lastSeekZone = 0
     var rippleHide: Job? = null
     var rippleId = 0L
 
@@ -124,22 +125,25 @@ fun Modifier.videoGestures(state: VideoGestureState, actions: VideoGestureAction
         fun onTap(pos: Offset, at: Long) {
             val zone = zoneOf(pos.x)
             when {
-                // 累加中：同側快速點擊立刻再加 10 秒
-                accumulating && zone != 0 && zone == lastTapZone && at - lastTapAt < GestureSpec.AccumulateMs -> showSeek(zone, pos)
-                // 第二下：雙擊
+                // 第二下：雙擊。每次快轉都要雙擊（以前雙擊後同側單擊也會一直跳，單擊想叫出控制列卻跳走了）；
+                // 提示裡的秒數在連續雙擊時累加
                 pendingTap != null && at - lastTapAt < GestureSpec.DoubleTapMs && zone == lastTapZone -> {
                     pendingTap?.cancel()
                     pendingTap = null
                     if (zone == 0) actions.togglePlay()
                     else {
+                        if (!accumulating || zone != lastSeekZone) accumulated = 0
                         accumulating = true
-                        accumulated = 0
+                        lastSeekZone = zone
                         showSeek(zone, pos)
                     }
+                    // 這兩下已經用掉：下一下重新開始判斷，不會跟第二下湊成另一個雙擊
+                    lastTapAt = 0L
+                    lastTapZone = zone
+                    return
                 }
                 // 第一下：等一下看有沒有第二下，沒有就是單擊
                 else -> {
-                    accumulating = false
                     pendingTap?.cancel()
                     pendingTap = scope.launch {
                         delay(GestureSpec.DoubleTapMs)

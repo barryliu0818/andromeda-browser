@@ -85,6 +85,12 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     /** 網頁影片全螢幕（WebChromeClient.onShowCustomView）的 View 與回呼 */
     var customView by mutableStateOf<View?>(null)
         private set
+
+    /** 網頁全螢幕按了轉向鈕（每按一次加一，畫面依目前方向轉成另一個） */
+    var rotateRequests by androidx.compose.runtime.mutableIntStateOf(0)
+        private set
+
+    override fun onFullscreenRotate() { if (customView != null) rotateRequests++ }
     private var customCallback: WebChromeClient.CustomViewCallback? = null
 
     /** 長按連結／圖片的結果，BrowserScreen 據此顯示預覽卡片與選單 */
@@ -746,21 +752,6 @@ class BrowserViewModel(app: Application) : AndroidViewModel(app), Tab.Listener {
     override fun onBlocked(n: Int) {
         blockedTotal.value += n
         statsPrefs.edit().putLong("blocked", blockedTotal.value).apply()
-    }
-
-    /**
-     * 經常瀏覽的網站（起始頁，Safari 的「經常瀏覽」）：近 30 天最常去的網域，已在常用網站裡的不重複列出。
-     * 連到網站首頁（scheme＋網域），名稱用主網域（en.wikipedia.org → wikipedia.org）；
-     * 比對、去重也用主網域：m.youtube.com 跟常用網站的 YouTube 是同一個網站
-     */
-    fun frequentSites(favorites: List<Visit>): kotlinx.coroutines.flow.Flow<List<Visit>> {
-        val favSites = favorites.map { baseDomain(favHost(it.url)) }.toSet()
-        return db.history().frequent(System.currentTimeMillis() - 30L * 86_400_000L, 24).map { list ->
-            list.filter { baseDomain(it.host) !in favSites }.distinctBy { baseDomain(it.host) }.take(8).map { f ->
-                val u = Uri.parse(f.url)
-                Visit("${u.scheme}://${u.authority}/", baseDomain(f.host))
-            }
-        }
     }
 
     /** 這次開 App 已經找過圖示的網域（找不到的也記著，不一直重試） */

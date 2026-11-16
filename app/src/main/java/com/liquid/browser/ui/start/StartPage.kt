@@ -299,10 +299,9 @@ private fun FavoritesPage(
         }
     }
     val showAll = { page: Int -> scope.launch { pager.animateScrollToPage(page, animationSpec = Motion.glass()) }; Unit }
-    val frequent by remember(sites) { vm.frequentSites(sites) }.collectAsState(emptyList())
     val blocked by vm.blockedTotal.collectAsState()
     // 沒開過的網站也自動抓圖示（不然只有字母方塊）
-    LaunchedEffect(sites, frequent) { vm.ensureIcons(sites + frequent) }
+    LaunchedEffect(sites) { vm.ensureIcons(sites) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = padding) {
         item(key = "fav") {
             // 跟書籤、閱讀列表、歷史紀錄頁同樣的大標題：左右滑動切換時標題不會一下大一下小
@@ -324,11 +323,6 @@ private fun FavoritesPage(
                 },
                 onAdd = { editing = Triple(null, "", "") },
             )
-        }
-        // 經常瀏覽的網站（Safari 起始頁）：近 30 天常去、還沒加進常用網站的
-        if (frequent.isNotEmpty()) item(key = "freq") {
-            SectionHeader(t("經常瀏覽的網站"), content, null, top = 28.dp)
-            TopSites(frequent, icons, content, Modifier.animateItem(), onPick = onOpen)
         }
         if (reading.isNotEmpty()) {
             item(key = "rl") { SectionHeader(t("閱讀列表"), content, { showAll(2) }, top = 28.dp) }

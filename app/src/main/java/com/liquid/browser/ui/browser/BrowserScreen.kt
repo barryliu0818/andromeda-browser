@@ -953,6 +953,13 @@ fun BrowserScreen(vm: BrowserViewModel) {
                         activity?.let { com.liquid.browser.player.backToPortrait(it) }
                     }
                 }
+                // 轉向鈕：直向時轉橫向（跟著手機左右橫拿），橫向時轉直向；手機鎖定方向時也有效
+                val isLandscape = landscape
+                LaunchedEffect(vm.rotateRequests) {
+                    if (vm.rotateRequests == 0) return@LaunchedEffect
+                    activity?.requestedOrientation =
+                        if (isLandscape) ActivityInfo.SCREEN_ORIENTATION_PORTRAIT else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                }
                 Box(Modifier.fillMaxSize().background(Color.Black)) {
                     AndroidView({ fullscreen.also { (it.parent as? ViewGroup)?.removeView(it) } }, Modifier.fillMaxSize())
                 }

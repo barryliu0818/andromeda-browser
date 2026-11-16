@@ -119,6 +119,8 @@ class Tab(
 
         /** 網頁影片旁的「下載」鈕 */
         fun onVideoDownload(tab: Tab, src: String, title: String)
+        /** 網頁全螢幕的轉向鈕：直向↔橫向 */
+        fun onFullscreenRotate() {}
         /** 注入每個頁面的 JS（assets/gesture_layer.js＋video_detect.js＋pw_autofill.js） */
         fun injectedScript(): String
         /** 只注入 YouTube 的 JS（assets/yt_subs.js） */
@@ -489,6 +491,8 @@ class Tab(
                     if (blockPage && AdBlocker.blocksRequest(u, request.url.host.orEmpty(), page, AdBlocker.resourceType(request))) {
                         // 廣告多的頁面一秒擋幾十個：累計起來每 100ms 更新一次計數（以前每擋一個就丟一個工作給主執行緒）
                         if (blockedPending.getAndIncrement() == 0) main.postDelayed({ val n = blockedPending.getAndSet(0); blockedCount += n; listener.onBlocked(n) }, 100)
+                        // 擋到影片本身（串流片段、影片檔）會讓影片卡住：記下來查是哪條規則誤擋
+                        if (isSniffableMedia(u)) com.liquid.browser.BugLog.limited("adblock", "擋下影片 ${request.url.host} (頁面 $page)")
                         return AdBlocker.emptyResponse()
                     }
                 }
@@ -805,6 +809,10 @@ class Tab(
                     }
                     "yt_state" -> if (json.optBoolean("noCaptions")) listener.onNoCaptions(this)
                     "download" -> json.optString("src").takeIf { it.startsWith("http") }?.let { listener.onVideoDownload(this, it, json.optString("title").ifBlank { title }) }
+                    // 網頁全螢幕的轉向鈕
+                    "rotate" -> listener.onFullscreenRotate()
+                    // 網頁影片卡住（等資料超過 3 秒）：記進錯誤紀錄
+                    "stall" -> com.liquid.browser.BugLog.event("player", "網頁影片卡住 ${json.optLong("ms")}ms $pageHost 位置 ${json.optInt("at")}s 已緩衝 ${json.optInt("ahead")}s ${json.optString("src")} 本頁擋下 $blockedCount")
                     "native" -> {
                         val src = json.optString("src").takeIf { it.startsWith("http") } ?: return@addWebMessageListener
                         val dpr = json.optDouble("dpr", 1.0).toFloat()
