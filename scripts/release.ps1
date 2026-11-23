@@ -6,7 +6,8 @@ $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
 
 if (git status --porcelain) { throw '有未提交的改動：先 commit 再發佈（版本號取自提交數）' }
-if (-not (Test-Path keystore.properties)) { throw '找不到 keystore.properties：沒有正式簽章，手機上的舊版無法直接更新' }
+# 沒有 keystore.properties 時用這台電腦的 debug 金鑰（手機上現在的版本也是它簽的，可以直接更新；金鑰備份在 D:\Keys）
+if (-not (Test-Path keystore.properties)) { Write-Warning '用 debug 金鑰簽章（%USERPROFILE%\.android\debug.keystore）：換電腦要帶著這個檔案，否則手機無法直接更新' }
 
 & .\gradlew.bat :app:assembleShareRelease -q
 if ($LASTEXITCODE -ne 0) { throw '編譯失敗' }
