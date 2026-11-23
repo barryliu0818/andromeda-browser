@@ -25,8 +25,10 @@ android {
         manifestPlaceholders["appLabel"] = "Orea"
         minSdk = 26
         targetSdk = 37
-        versionCode = 4
-        versionName = "0.4"
+        // 版本號＝git 提交數：每次發佈到 GitHub Releases 都比上一版大，手機下載安裝會直接更新（不會因為版本號一樣或變小而裝不上）
+        val commits = providers.exec { commandLine("git", "rev-list", "--count", "HEAD") }.standardOutput.asText.get().trim().toIntOrNull() ?: 4
+        versionCode = commits
+        versionName = "0.5.$commits"
     }
 
     signingConfigs {
