@@ -1,4 +1,4 @@
-# 發佈到 GitHub Releases：編譯 share 版（不含任何金鑰）、建立 release、上傳 APK，手機上直接下載安裝。
+﻿# 發佈到 GitHub Releases：編譯 share 版（不含任何金鑰）、建立 release、上傳 APK，手機上直接下載安裝。
 #   powershell -File scripts\release.ps1 [-Notes "這版改了什麼"]
 # 需要：gh 已登入、keystore.properties（正式簽章，不進 git）、local.properties 的 OREA_CORE_DIR（內建核心，不進 git）。
 param([string]$Notes = "")
