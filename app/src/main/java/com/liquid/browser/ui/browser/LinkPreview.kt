@@ -87,8 +87,10 @@ fun LinkPreviewHost(vm: BrowserViewModel, haze: HazeState, tone: Tone, webTop: F
     val link = hit.link
     val items = buildList {
         if (link != null) {
-            add(Triple(t("在新分頁開啟"), "add_box") { vm.newTab(link) })
-            add(Triple(t("在背景分頁開啟"), "tab") { vm.newTab(link, background = true); vm.showToast(t("已在背景開啟")) })
+            // 記住是從哪一頁開的：在新分頁按返回（沒有上一頁時）會關掉它、回到這一頁（同 Chrome）
+            val from = vm.current
+            add(Triple(t("在新分頁開啟"), "add_box") { vm.newTab(link).opener = from })
+            add(Triple(t("在背景分頁開啟"), "tab") { vm.newTab(link, background = true).opener = from; vm.showToast(t("已在背景開啟")) })
             add(Triple(t("拷貝連結"), "content_copy") { copy(link) })
             add(Triple(t("分享"), "ios_share") { share(context, link) })
             add(Triple(t("加入閱讀列表"), "eyeglasses") { vm.addToReadingList(link, Uri.parse(link).host.orEmpty(), hit.image) })

@@ -276,8 +276,9 @@ fun BrowserScreen(vm: BrowserViewModel) {
     val back = remember(tab) { Animatable(0f) }
     var backForward by remember(tab) { mutableStateOf(false) }
     var backShot by remember(tab) { mutableStateOf<ImageBitmap?>(null) }
-    // 網頁沒有上一頁時，返回手勢回到首頁（不退出 App）；原本的網頁留在分頁管理裡，之後還找得回來
-    BackHandler(!tab.canGoBack && !tab.isBlank && !focused && !overview) { vm.newTab(incognito = tab.incognito) }
+    // 網頁沒有上一頁時的返回（同 Chrome／Brave）：從別的網頁開出來的分頁（Google 搜尋結果點進去開新分頁）關掉、回到原本那頁；
+    // 其他回到首頁（不退出 App），原本的網頁留在分頁管理裡
+    BackHandler(!tab.canGoBack && !tab.isBlank && !focused && !overview) { vm.backFromFirstPage(tab) }
     PredictiveBackHandler(tab.canGoBack && !focused && !overview) { events ->
         try {
             events.collect { e ->
@@ -681,7 +682,7 @@ fun BrowserScreen(vm: BrowserViewModel) {
                     ),
                 )
             }
-            val goBack = { if (tab.canGoBack) tab.webView.goBack() else if (!tab.isBlank) vm.newTab(incognito = tab.incognito) }
+            val goBack = { if (tab.canGoBack) tab.webView.goBack() else if (!tab.isBlank) vm.backFromFirstPage(tab) }
 
             // 隱藏控制項：整列滑出畫面，點畫面底部（直向）／頂部（橫向）叫回
             val hide = animateFloatAsState(if (vm.controlsHidden) 1f else 0f, Motion.glass(), label = "hide")
