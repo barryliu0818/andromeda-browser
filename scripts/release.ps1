@@ -2,7 +2,8 @@
 #   powershell -File scripts\release.ps1 [-Notes "這版改了什麼"]
 # 需要：gh 已登入、keystore.properties（正式簽章，不進 git）、local.properties 的 OREA_CORE_DIR（內建核心，不進 git）。
 param([string]$Notes = "")
-$ErrorActionPreference = 'Stop'
+# 不用 Stop：Windows PowerShell 5 會把 gradle 寫到 stderr 的編譯提示當成錯誤中止；成功與否看每個指令的結束碼
+$ErrorActionPreference = 'Continue'
 Set-Location (Join-Path $PSScriptRoot '..')
 
 if (git status --porcelain) { throw '有未提交的改動：先 commit 再發佈（版本號取自提交數）' }
